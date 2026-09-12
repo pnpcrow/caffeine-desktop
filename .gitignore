@@ -1,0 +1,35 @@
+# Flutter + Rust artifacts
+build/
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.pub-cache/
+.pub/
+/packages/
+
+# Rust
+rust/target/
+**/*.rs.bk
+# NOTE: rust/Cargo.lock is COMMITTED for reproducible native builds.
+
+# Inno Setup output + staging
+installer/Output/
+installer/staging/
+
+# Generated FRB bridge is COMMITTED (reproducible builds without codegen).
+# To regenerate: flutter_rust_bridge_codegen generate --config-file flutter_rust_bridge.yaml
+
+# Icons are committed (see tools/make_icons.py for regeneration).
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+
+# Test logs
+caffeine-e2e/
+
+# Runtime session logs
+logs/
