@@ -1,0 +1,538 @@
+import 'dart:async';
+
+import 'package:flutter/material.dart';
+import 'package:window_manager/window_manager.dart';
+
+import 'src/rust/api.dart' as core;
+import 'src/rust/manager.dart' show Status;
+import 'src/rust/settings.dart' show Settings, UnlockKey, UnlockMouse;
+import 'theme.dart';
+import 'tray.dart';
+
+const _timeOptions = <int, String>{
+  60: '1분',
+  120: '2분',
+  180: '3분',
+  300: '5분',
+  600: '10분',
+  900: '15분',
+  1800: '30분',
+};
+
+String _keyLabel(UnlockKey k) => switch (k) {
+      UnlockKey.any => '아무 키나',
+      UnlockKey.esc => 'ESC 키만',
+      UnlockKey.space => '스페이스바만',
+      UnlockKey.enter => '엔터 키만',
+    };
+
+String _mouseLabel(UnlockMouse m) => switch (m) {
+      UnlockMouse.off => '사용 안 함 (키보드로만 해제)',
+      UnlockMouse.shake => '마우스 흔들기',
+      UnlockMouse.move => '마우스 움직이기',
+      UnlockMouse.click => '마우스 클릭',
+    };
+
+class SettingsPage extends StatefulWidget {
+  const SettingsPage({super.key});
+
+  @override
+  State<SettingsPage> createState() => _SettingsPageState();
+}
+
+class _SettingsPageState extends State<SettingsPage> with WindowListener {
+  Settings? _settings;
+  Status? _status;
+  StreamSubscription<Status>? _sub;
+
+  @override
+  void initState() {
+    super.initState();
+    windowManager.addListener(this);
+    _reload();
+    _sub = core.watchEvents().listen((status) async {
+      if (!mounted) return;
+      setState(() => _status = status);
+      await trayController.refresh(status);
+    });
+  }
+
+  @override
+  void dispose() {
+    windowManager.removeListener(this);
+    _sub?.cancel();
+    super.dispose();
+  }
+
+  @override
+  void onWindowClose() async {
+    // Frameless ✕ means "minimize to tray", quit lives in the tray menu.
+    await windowManager.hide();
+  }
+
+  Future<void> _reload() async {
+    final s = await core.getSettings();
+    final st = await core.getStatus();
+    if (!mounted) return;
+    setState(() {
+      _settings = s;
+      _status = st;
+    });
+    await trayController.refresh(st);
+  }
+
+  Future<void> _push() async {
+    final s = _settings;
+    if (s == null) return;
+    await core.saveSettings(s: s);
+  }
+
+  Future<void> _hide() => windowManager.hide();
+
+  @override
+  Widget build(BuildContext context) {
+    final settings = _settings;
+    final status = _status;
+    // Scaffold (=> Material ancestor) is mandatory: Switch, buttons and
+    // dropdowns require it, and without it release builds render garbage.
+    return Scaffold(
+      backgroundColor: Colors.transparent,
+      body: Container(
+      decoration: AppTheme.shell(),
+      child: Column(
+        children: [
+          _titlebar(),
+          Expanded(
+            child: settings == null || status == null
+                ? const Center(
+                    child: Text('불러오는 중…',
+                        style: TextStyle(color: AppTheme.muted)))
+                : SingleChildScrollView(
+                    padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        _hero(),
+                        const SizedBox(height: 10),
+                        _statusCard(status),
+                        const SizedBox(height: 10),
+                        _awakeCard(settings, status),
+                        const SizedBox(height: 10),
+                        _autoCard(settings),
+                        const SizedBox(height: 10),
+                        _unlockCard(settings),
+                        const SizedBox(height: 12),
+                        _footer(),
+                        const SizedBox(height: 16),
+                      ],
+                    ),
+                  ),
+          ),
+        ],
+      ),
+      ),
+    );
+  }
+
+  Widget _titlebar() {    return DragToMoveArea(
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(16, 10, 8, 6),
+        child: Row(
+          children: [
+            Image.asset('assets/icons/icon.png', width: 24, height: 24),
+            const SizedBox(width: 9),
+            const Text('Caffeine Desktop',
+                style: TextStyle(
+                    color: AppTheme.cream,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700)),
+            const Spacer(),
+            _tbtn('–', _hide),
+            _tbtn('✕', _hide, danger: true),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _tbtn(String glyph, VoidCallback onTap, {bool danger = false}) {
+    return SizedBox(
+      width: 30,
+      height: 26,
+      child: TextButton(
+        style: TextButton.styleFrom(
+          padding: EdgeInsets.zero,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        ),
+        onPressed: onTap,
+        child: Text(glyph,
+            style: TextStyle(
+                color: danger ? const Color(0xFFF3B8B1) : AppTheme.muted,
+                fontSize: 14)),
+      ),
+    );
+  }
+
+  Widget _hero() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+      child: Row(
+        children: [
+          Image.asset('assets/icons/icon.png', width: 104, height: 104),
+          const SizedBox(width: 16),
+          const Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('깨어 있는 화면',
+                    style: TextStyle(
+                        color: AppTheme.cream,
+                        fontSize: 21,
+                        fontWeight: FontWeight.w800)),
+                SizedBox(height: 5),
+                Text('절전 방지 + 캡처에 보이지 않는 화면 가림',
+                    style: TextStyle(color: AppTheme.muted, fontSize: 12.5)),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _card(Widget child) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: AppTheme.cardDeco(),
+      child: child,
+    );
+  }
+
+  Widget _statusCard(Status s) {
+    return _card(Row(
+      children: [
+        _pill(s.awake ? '절전 방지 켜짐' : '절전 방지 꺼짐', s.awake),
+        const SizedBox(width: 8),
+        _pill(s.blackout ? '화면 가림 중' : '화면 정상',
+            !s.blackout ? true : null,
+            warn: s.blackout),
+        const Spacer(),
+        Text('v${s.version}',
+            style: const TextStyle(color: AppTheme.muted, fontSize: 11)),
+      ],
+    ));
+  }
+
+  Widget _pill(String text, bool? on, {bool warn = false}) {
+    final color = warn
+        ? AppTheme.accent
+        : (on == true ? AppTheme.green : AppTheme.red);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.25),
+        border: Border.all(color: color.withValues(alpha: 0.5)),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+              width: 8,
+              height: 8,
+              decoration:
+                  BoxDecoration(color: color, shape: BoxShape.circle)),
+          const SizedBox(width: 7),
+          Text(text,
+              style: const TextStyle(
+                  color: AppTheme.cream,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600)),
+        ],
+      ),
+    );
+  }
+
+  Widget _awakeCard(Settings s, Status st) {
+    return _card(Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            const Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('디스플레이 절전 방지',
+                      style: TextStyle(
+                          color: AppTheme.cream,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700)),
+                  SizedBox(height: 4),
+                  Text('화면 꺼짐·잠자기·화면 보호기를 막고 활성 상태를 유지합니다.',
+                      style: TextStyle(color: AppTheme.muted, fontSize: 12)),
+                ],
+              ),
+            ),
+            Switch(
+              value: s.awakeEnabled,
+              activeThumbColor: AppTheme.accent,
+              onChanged: (v) async {
+                setState(() => _settings = _copy(s, awakeEnabled: v));
+                await core.setAwake(on_: v);
+              },
+            ),
+          ],
+        ),
+        const SizedBox(height: 11),
+        Row(
+          children: [
+            Expanded(
+              child: ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppTheme.accent,
+                  foregroundColor: const Color(0xFF241305),
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10)),
+                ),
+                onPressed: st.blackout
+                    ? null
+                    : () async {
+                        await core.blackoutNow();
+                      },
+                child: const Text('지금 화면 가리기',
+                    style: TextStyle(fontWeight: FontWeight.w700)),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: OutlinedButton(
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppTheme.cream,
+                  side: const BorderSide(color: AppTheme.cardBorder),
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10)),
+                ),
+                onPressed: st.blackout
+                    ? () async {
+                        await core.clearBlackout();
+                      }
+                    : null,
+                child: const Text('가림 해제'),
+              ),
+            ),
+          ],
+        ),
+      ],
+    ));
+  }
+
+  Widget _autoCard(Settings s) {
+    return _card(Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            const Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('자동 화면 가리기',
+                      style: TextStyle(
+                          color: AppTheme.cream,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700)),
+                  SizedBox(height: 4),
+                  Text('조작이 없으면 일정 시간 후 자동으로 화면을 가립니다.',
+                      style: TextStyle(color: AppTheme.muted, fontSize: 12)),
+                ],
+              ),
+            ),
+            Switch(
+              value: s.autoBlackoutEnabled,
+              activeThumbColor: AppTheme.accent,
+              onChanged: (v) async {
+                setState(() => _settings = _copy(s, autoBlackoutEnabled: v));
+                await core.setAutoBlackout(on_: v);
+              },
+            ),
+          ],
+        ),
+        const SizedBox(height: 11),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            const Text('가리기까지 대기 시간',
+                style: TextStyle(color: AppTheme.muted, fontSize: 12.5)),
+            _dropdown<int>(
+              value: s.autoBlackoutSecs.toInt(),
+              items: _timeOptions,
+              onChanged: (v) async {
+                if (v == null) return;
+                setState(
+                    () => _settings = _copy(s, autoBlackoutSecs: v));
+                await _push();
+              },
+            ),
+          ],
+        ),
+      ],
+    ));
+  }
+
+  Widget _unlockCard(Settings s) {
+    return _card(Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text('가림 해제 방법',
+            style: TextStyle(
+                color: AppTheme.cream,
+                fontSize: 14,
+                fontWeight: FontWeight.w700)),
+        const SizedBox(height: 4),
+        const Text('검은 화면을 해제하는 조건을 설정합니다.',
+            style: TextStyle(color: AppTheme.muted, fontSize: 12)),
+        const SizedBox(height: 11),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            const Text('키보드',
+                style: TextStyle(color: AppTheme.muted, fontSize: 12.5)),
+            _dropdown<UnlockKey>(
+              value: s.unlockKey,
+              items: {for (final k in UnlockKey.values) k: _keyLabel(k)},
+              onChanged: (v) async {
+                if (v == null) return;
+                setState(() => _settings = _copy(s, unlockKey: v));
+                await _push();
+              },
+            ),
+          ],
+        ),
+        const SizedBox(height: 11),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            const Text('마우스',
+                style: TextStyle(color: AppTheme.muted, fontSize: 12.5)),
+            _dropdown<UnlockMouse>(
+              value: s.unlockMouse,
+              items: {for (final m in UnlockMouse.values) m: _mouseLabel(m)},
+              onChanged: (v) async {
+                if (v == null) return;
+                setState(() => _settings = _copy(s, unlockMouse: v));
+                await _push();
+              },
+            ),
+          ],
+        ),
+        const SizedBox(height: 11),
+        Container(
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: AppTheme.accent.withValues(alpha: 0.08),
+            border: Border.all(
+                color: AppTheme.accent.withValues(alpha: 0.4),
+                style: BorderStyle.solid),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: const Text(
+            'AI 에이전트(Computer Use) 동작 중에는 키보드 + 흔들기/사용 안 함 조합을 권장합니다. '
+            '가림막은 캡처에서 제외되고 입력은 그대로 통과하므로 에이전트는 정상 동작합니다.',
+            style: TextStyle(color: AppTheme.muted, fontSize: 11.5, height: 1.6),
+          ),
+        ),
+      ],
+    ));
+  }
+
+  Widget _dropdown<T>({
+    required T value,
+    required Map<T, String> items,
+    required ValueChanged<T?> onChanged,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10),
+      decoration: BoxDecoration(
+        color: AppTheme.bg2,
+        border: Border.all(color: AppTheme.cardBorder),
+        borderRadius: BorderRadius.circular(9),
+      ),
+      child: DropdownButton<T>(
+        value: value,
+        underline: const SizedBox.shrink(),
+        dropdownColor: AppTheme.bg2,
+        style: const TextStyle(color: AppTheme.cream, fontSize: 12.5),
+        items: [
+          for (final e in items.entries)
+            DropdownMenuItem(value: e.key, child: Text(e.value)),
+        ],
+        onChanged: onChanged,
+      ),
+    );
+  }
+
+  Widget _footer() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: OutlinedButton(
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppTheme.cream,
+                  side: const BorderSide(color: AppTheme.cardBorder),
+                  padding: const EdgeInsets.symmetric(vertical: 11),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10)),
+                ),
+                onPressed: _hide,
+                child: const Text('트레이로 최소화'),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: OutlinedButton(
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: const Color(0xFFF3B8B1),
+                  side: BorderSide(
+                      color: AppTheme.red.withValues(alpha: 0.4)),
+                  padding: const EdgeInsets.symmetric(vertical: 11),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10)),
+                ),
+                onPressed: () => quitApp(),
+                child: const Text('종료'),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 9),
+        const Text('가림 동작 중 스크린샷·영상 캡처에는 검은 영역이 찍히지 않습니다.',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: AppTheme.muted, fontSize: 11)),
+      ],
+    );
+  }
+
+  Settings _copy(
+    Settings s, {
+    bool? awakeEnabled,
+    bool? autoBlackoutEnabled,
+    int? autoBlackoutSecs,
+    UnlockKey? unlockKey,
+    UnlockMouse? unlockMouse,
+  }) {
+    return Settings(
+      awakeEnabled: awakeEnabled ?? s.awakeEnabled,
+      autoBlackoutEnabled: autoBlackoutEnabled ?? s.autoBlackoutEnabled,
+      autoBlackoutSecs: BigInt.from(autoBlackoutSecs ?? s.autoBlackoutSecs.toInt()),
+      unlockKey: unlockKey ?? s.unlockKey,
+      unlockMouse: unlockMouse ?? s.unlockMouse,
+      startMinimized: s.startMinimized,
+    );
+  }
+}

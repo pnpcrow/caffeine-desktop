@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+  <!-- Caffeine Desktop mark: espresso tile + caramel monitor + coffee cup -->
+  <rect x="8" y="8" width="240" height="240" rx="44" fill="#1A1009"/>
+  <rect x="8" y="8" width="240" height="240" rx="44" fill="none" stroke="#E8A33D" stroke-width="7"/>
+  <rect x="44" y="56" width="168" height="112" rx="12" fill="none" stroke="#F5EBDD" stroke-width="9"/>
+  <rect x="58" y="70" width="140" height="84" rx="6" fill="#2A1D12"/>
+  <rect x="118" y="168" width="20" height="16" fill="#F5EBDD"/>
+  <rect x="96" y="184" width="64" height="10" rx="5" fill="#F5EBDD"/>
+  <rect x="96" y="102" width="50" height="40" rx="6" fill="#F5EBDD"/>
+  <path d="M146 106h6a12 12 0 0 1 0 24h-8" fill="none" stroke="#F5EBDD" stroke-width="7"/>
+  <ellipse cx="121" cy="102" rx="21" ry="6" fill="#C96F2B"/>
+  <ellipse cx="121" cy="102" rx="15" ry="4" fill="#6B3E1E"/>
+  <g stroke="#E8A33D" stroke-width="5" fill="none" stroke-linecap="round">
+    <path d="M110 92c-4-4 2-6-2-10s2-6-2-10"/>
+    <path d="M121 94c-4-4 2-6-2-10s2-6-2-10"/>
+    <path d="M132 92c-4-4 2-6-2-10s2-6-2-10"/>
+  </g>
+</svg>
