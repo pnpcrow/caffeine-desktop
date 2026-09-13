@@ -507,6 +507,25 @@ impl SseDecode for Vec<u8> {
     }
 }
 
+impl SseDecode for crate::settings::OsdPosition {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut inner = <i32>::sse_decode(deserializer);
+        return match inner {
+            0 => crate::settings::OsdPosition::TopLeft,
+            1 => crate::settings::OsdPosition::TopCenter,
+            2 => crate::settings::OsdPosition::TopRight,
+            3 => crate::settings::OsdPosition::MiddleLeft,
+            4 => crate::settings::OsdPosition::Center,
+            5 => crate::settings::OsdPosition::MiddleRight,
+            6 => crate::settings::OsdPosition::BottomLeft,
+            7 => crate::settings::OsdPosition::BottomCenter,
+            8 => crate::settings::OsdPosition::BottomRight,
+            _ => unreachable!("Invalid variant for OsdPosition: {}", inner),
+        };
+    }
+}
+
 impl SseDecode for crate::settings::Settings {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -516,6 +535,8 @@ impl SseDecode for crate::settings::Settings {
         let mut var_unlockKey = <crate::settings::UnlockKey>::sse_decode(deserializer);
         let mut var_unlockMouse = <crate::settings::UnlockMouse>::sse_decode(deserializer);
         let mut var_startMinimized = <bool>::sse_decode(deserializer);
+        let mut var_osdEnabled = <bool>::sse_decode(deserializer);
+        let mut var_osdPosition = <crate::settings::OsdPosition>::sse_decode(deserializer);
         return crate::settings::Settings {
             awake_enabled: var_awakeEnabled,
             auto_blackout_enabled: var_autoBlackoutEnabled,
@@ -523,6 +544,8 @@ impl SseDecode for crate::settings::Settings {
             unlock_key: var_unlockKey,
             unlock_mouse: var_unlockMouse,
             start_minimized: var_startMinimized,
+            osd_enabled: var_osdEnabled,
+            osd_position: var_osdPosition,
         };
     }
 }
@@ -632,6 +655,31 @@ fn pde_ffi_dispatcher_sync_impl(
 // Section: rust2dart
 
 // Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::settings::OsdPosition {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        match self {
+            Self::TopLeft => 0.into_dart(),
+            Self::TopCenter => 1.into_dart(),
+            Self::TopRight => 2.into_dart(),
+            Self::MiddleLeft => 3.into_dart(),
+            Self::Center => 4.into_dart(),
+            Self::MiddleRight => 5.into_dart(),
+            Self::BottomLeft => 6.into_dart(),
+            Self::BottomCenter => 7.into_dart(),
+            Self::BottomRight => 8.into_dart(),
+            _ => unreachable!(),
+        }
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive for crate::settings::OsdPosition {}
+impl flutter_rust_bridge::IntoIntoDart<crate::settings::OsdPosition>
+    for crate::settings::OsdPosition
+{
+    fn into_into_dart(self) -> crate::settings::OsdPosition {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for crate::settings::Settings {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
@@ -641,6 +689,8 @@ impl flutter_rust_bridge::IntoDart for crate::settings::Settings {
             self.unlock_key.into_into_dart().into_dart(),
             self.unlock_mouse.into_into_dart().into_dart(),
             self.start_minimized.into_into_dart().into_dart(),
+            self.osd_enabled.into_into_dart().into_dart(),
+            self.osd_position.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -756,6 +806,29 @@ impl SseEncode for Vec<u8> {
     }
 }
 
+impl SseEncode for crate::settings::OsdPosition {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(
+            match self {
+                crate::settings::OsdPosition::TopLeft => 0,
+                crate::settings::OsdPosition::TopCenter => 1,
+                crate::settings::OsdPosition::TopRight => 2,
+                crate::settings::OsdPosition::MiddleLeft => 3,
+                crate::settings::OsdPosition::Center => 4,
+                crate::settings::OsdPosition::MiddleRight => 5,
+                crate::settings::OsdPosition::BottomLeft => 6,
+                crate::settings::OsdPosition::BottomCenter => 7,
+                crate::settings::OsdPosition::BottomRight => 8,
+                _ => {
+                    unimplemented!("");
+                }
+            },
+            serializer,
+        );
+    }
+}
+
 impl SseEncode for crate::settings::Settings {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -765,6 +838,8 @@ impl SseEncode for crate::settings::Settings {
         <crate::settings::UnlockKey>::sse_encode(self.unlock_key, serializer);
         <crate::settings::UnlockMouse>::sse_encode(self.unlock_mouse, serializer);
         <bool>::sse_encode(self.start_minimized, serializer);
+        <bool>::sse_encode(self.osd_enabled, serializer);
+        <crate::settings::OsdPosition>::sse_encode(self.osd_position, serializer);
     }
 }
 

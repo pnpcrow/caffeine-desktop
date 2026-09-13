@@ -12,6 +12,7 @@ pub mod frb_generated;
 pub mod idle;
 pub mod log;
 pub mod manager;
+pub mod osd;
 pub mod overlay;
 pub mod settings;
 pub mod unlock;

@@ -35,7 +35,33 @@ pub const WM_DISPLAYCHANGE: u32 = 0x007E;
 pub const WM_CLOSE: u32 = 0x0010;
 pub const WM_QUIT: u32 = 0x0012;
 pub const SW_RESTORE: i32 = 9;
+pub const SW_HIDE: i32 = 0;
 pub const ERROR_ALREADY_EXISTS: u32 = 183;
+/// Base for private thread messages (OSD repaint requests use WM_APP + n).
+pub const WM_APP: u32 = 0x8000;
+
+// --- GDI shapes / layered composition (OSD) -----------------------------------
+
+pub const PS_SOLID: i32 = 0;
+pub const NULL_BRUSH: i32 = 5;
+pub const NULL_PEN: i32 = 8;
+pub const BI_RGB: u32 = 0;
+pub const DIB_RGB_COLORS: u32 = 0;
+pub const ULW_ALPHA: u32 = 2;
+pub const AC_SRC_OVER: u8 = 0;
+pub const AC_SRC_ALPHA: u8 = 1;
+pub const MONITORINFOF_PRIMARY: u32 = 1;
+
+// --- GDI text (blackout unlock hint) -----------------------------------------
+
+pub const BKMODE_TRANSPARENT: i32 = 1;
+pub const TA_CENTER: u32 = 6;
+pub const FW_NORMAL: i32 = 400;
+pub const DEFAULT_CHARSET: u32 = 1;
+pub const OUT_DEFAULT_PRECIS: u32 = 0;
+pub const CLIP_DEFAULT_PRECIS: u32 = 0;
+pub const CLEARTYPE_QUALITY: u32 = 5;
+pub const DEFAULT_PITCH: u32 = 0;
 
 /// Per-monitor-V2 DPI awareness (Win10 1607+; target is Win11+).
 /// Threads that create/position windows must opt in, otherwise the OS
@@ -84,6 +110,49 @@ pub struct MonitorInfo {
     pub flags: u32,
 }
 
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct Point {
+    pub x: i32,
+    pub y: i32,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct Size {
+    pub cx: i32,
+    pub cy: i32,
+}
+
+#[repr(C)]
+pub struct BitmapInfoHeader {
+    pub size: u32,
+    pub width: i32,
+    pub height: i32,
+    pub planes: u16,
+    pub bit_count: u16,
+    pub compression: u32,
+    pub size_image: u32,
+    pub xppm: i32,
+    pub yppm: i32,
+    pub clr_used: u32,
+    pub clr_important: u32,
+}
+
+#[repr(C)]
+pub struct BitmapInfo {
+    pub header: BitmapInfoHeader,
+    pub colors: [u8; 4],
+}
+
+#[repr(C)]
+pub struct BlendFunction {
+    pub blend_op: u8,
+    pub blend_flags: u8,
+    pub source_constant_alpha: u8,
+    pub alpha_format: u8,
+}
+
 pub type WndProc = Option<unsafe extern "system" fn(isize, u32, usize, isize) -> isize>;
 pub type EnumMonProc =
     Option<unsafe extern "system" fn(isize, isize, *mut Rect, isize) -> i32>;
@@ -110,6 +179,8 @@ pub struct MonitorRect {
     pub y: i32,
     pub w: i32,
     pub h: i32,
+    /// True for the primary monitor.
+    pub primary: bool,
 }
 
 #[link(name = "user32")]
@@ -170,9 +241,72 @@ extern "system" {
     ) -> i32;
     fn GetMonitorInfoW(hmon: isize, info: *mut MonitorInfo) -> i32;
     fn GetWindowRect(hwnd: isize, rect: *mut Rect) -> i32;
+    fn GetClientRect(hwnd: isize, rect: *mut Rect) -> i32;
     fn SetThreadDpiAwarenessContext(ctx: isize) -> isize;
     fn SetForegroundWindow(hwnd: isize) -> i32;
     fn CreateMutexW(attr: *const c_void, owner: i32, name: *const u16) -> isize;
+    fn UpdateLayeredWindow(
+        hwnd: isize,
+        dst_dc: isize,
+        dst_pt: *const Point,
+        size: *const Size,
+        src_dc: isize,
+        src_pt: *const Point,
+        key: u32,
+        blend: *const BlendFunction,
+        flags: u32,
+    ) -> i32;
+}
+
+#[link(name = "gdi32")]
+extern "system" {
+    fn CreateFontW(
+        height: i32,
+        width: i32,
+        escapement: i32,
+        orientation: i32,
+        weight: i32,
+        italic: u32,
+        underline: u32,
+        strikeout: u32,
+        charset: u32,
+        out_precision: u32,
+        clip_precision: u32,
+        quality: u32,
+        pitch_and_family: u32,
+        face: *const u16,
+    ) -> isize;
+    fn SelectObject(hdc: isize, obj: isize) -> isize;
+    fn DeleteObject(obj: isize) -> i32;
+    fn SetTextColor(hdc: isize, color: u32) -> u32;
+    fn SetBkMode(hdc: isize, mode: i32) -> i32;
+    fn SetTextAlign(hdc: isize, align: u32) -> u32;
+    fn TextOutW(hdc: isize, x: i32, y: i32, s: *const u16, count: i32) -> i32;
+    fn CreateCompatibleDC(hdc: isize) -> isize;
+    fn DeleteDC(hdc: isize) -> i32;
+    fn CreateDIBSection(
+        hdc: isize,
+        bmi: *const BitmapInfo,
+        usage: u32,
+        bits: *mut *mut c_void,
+        section: isize,
+        offset: u32,
+    ) -> isize;
+    fn CreateSolidBrush(color: u32) -> isize;
+    fn CreatePen(style: i32, width: i32, color: u32) -> isize;
+    fn MoveToEx(hdc: isize, x: i32, y: i32, previous: *mut Point) -> i32;
+    fn LineTo(hdc: isize, x: i32, y: i32) -> i32;
+    fn Ellipse(hdc: isize, l: i32, t: i32, r: i32, b: i32) -> i32;
+    fn RoundRect(
+        hdc: isize,
+        l: i32,
+        t: i32,
+        r: i32,
+        b: i32,
+        edge_w: i32,
+        edge_h: i32,
+    ) -> i32;
+    fn GdiFlush() -> i32;
 }
 
 #[link(name = "kernel32")]
@@ -342,6 +476,13 @@ pub fn post_thread_close(thread_id: u32) {
         PostThreadMessageW(thread_id, WM_CLOSE, 0, 0);
     }
 }
+
+/// Post a private thread message (e.g. WM_APP + n) to a pump thread.
+pub fn post_thread_msg(thread_id: u32, msg: u32) {
+    unsafe {
+        PostThreadMessageW(thread_id, msg, 0, 0);
+    }
+}
 pub fn pump_messages() {
     unsafe {
         let mut msg: WinMsg = std::mem::zeroed();
@@ -389,21 +530,269 @@ pub fn place_window(hwnd: isize, x: i32, y: i32, w: i32, h: i32) {
     }
 }
 
-pub fn paint_black(hwnd: isize) {
+/// Begin a WM_PAINT cycle. Returns the paint DC (0 on failure).
+pub fn begin_paint(hwnd: isize, ps: &mut Paint) -> isize {
+    unsafe { BeginPaint(hwnd, ps) }
+}
+
+/// End a WM_PAINT cycle begun with [`begin_paint`] (mandatory, even on error).
+pub fn end_paint(hwnd: isize, ps: &Paint) -> i32 {
+    unsafe { EndPaint(hwnd, ps as *const Paint) }
+}
+
+/// Fill `rc` with the stock black brush.
+pub fn fill_black(hdc: isize, rc: &Rect) {
     unsafe {
-        let mut ps: Paint = std::mem::zeroed();
-        let hdc = BeginPaint(hwnd, &mut ps);
-        if hdc != 0 {
-            let rc = Rect {
-                left: ps.left,
-                top: ps.top,
-                right: ps.right,
-                bottom: ps.bottom,
-            };
-            let brush = GetStockObject(BLACK_BRUSH);
-            FillRect(hdc, &rc, brush);
+        FillRect(hdc, rc as *const Rect, GetStockObject(BLACK_BRUSH));
+    }
+}
+
+/// Client-area rect (== window rect for WS_POPUP overlays). None on failure.
+pub fn client_rect(hwnd: isize) -> Option<Rect> {
+    let mut rc: Rect = Rect {
+        left: 0,
+        top: 0,
+        right: 0,
+        bottom: 0,
+    };
+    let ok = unsafe { GetClientRect(hwnd, &mut rc) != 0 };
+    if ok {
+        Some(rc)
+    } else {
+        None
+    }
+}
+
+/// Draw one line of `text` horizontally centered at `cx`, top edge at `y`,
+/// in Malgun Gothic at `font_px` with `color` (COLORREF 0x00BBGGRR) on a
+/// transparent background. Best-effort: silently skips on font failure.
+pub fn draw_centered_text(hdc: isize, cx: i32, y: i32, text: &str, font_px: i32, color: u32) {
+    unsafe {
+        let face = wide_null("Malgun Gothic");
+        let font = CreateFontW(
+            font_px,
+            0,
+            0,
+            0,
+            FW_NORMAL,
+            0,
+            0,
+            0,
+            DEFAULT_CHARSET,
+            OUT_DEFAULT_PRECIS,
+            CLIP_DEFAULT_PRECIS,
+            CLEARTYPE_QUALITY,
+            DEFAULT_PITCH,
+            face.as_ptr(),
+        );
+        if font == 0 {
+            return;
         }
-        EndPaint(hwnd, &ps);
+        let old = SelectObject(hdc, font);
+        SetTextColor(hdc, color);
+        SetBkMode(hdc, BKMODE_TRANSPARENT);
+        SetTextAlign(hdc, TA_CENTER);
+        let wide = wide_null(text);
+        TextOutW(hdc, cx, y, wide.as_ptr(), (wide.len() - 1) as i32);
+        SelectObject(hdc, old);
+        DeleteObject(font);
+    }
+}
+
+// --- OSD drawing / layered composition -----------------------------------------
+
+/// Stock object handle by id (NULL_BRUSH, NULL_PEN, ...).
+pub fn stock_obj(which: i32) -> isize {
+    unsafe { GetStockObject(which) }
+}
+
+/// Select a GDI object into a DC; returns the previously selected object.
+pub fn select_object(hdc: isize, obj: isize) -> isize {
+    unsafe { SelectObject(hdc, obj) }
+}
+
+/// Delete a GDI object (must not be currently selected into a live DC).
+pub fn delete_object(obj: isize) {
+    unsafe {
+        DeleteObject(obj);
+    }
+}
+
+/// Solid brush in `color` (COLORREF). Caller must DeleteObject.
+pub fn create_solid_brush(color: u32) -> isize {
+    unsafe { CreateSolidBrush(color) }
+}
+
+/// Solid pen (width in px) in `color` (COLORREF). Caller must DeleteObject.
+pub fn create_pen(width: i32, color: u32) -> isize {
+    unsafe { CreatePen(PS_SOLID, width, color) }
+}
+
+pub fn move_to(hdc: isize, x: i32, y: i32) {
+    unsafe {
+        MoveToEx(hdc, x, y, std::ptr::null_mut());
+    }
+}
+
+pub fn line_to(hdc: isize, x: i32, y: i32) {
+    unsafe {
+        LineTo(hdc, x, y);
+    }
+}
+
+/// Outline/filled ellipse with the currently selected pen and brush.
+pub fn ellipse_shape(hdc: isize, l: i32, t: i32, r: i32, b: i32) {
+    unsafe {
+        Ellipse(hdc, l, t, r, b);
+    }
+}
+
+/// Rounded rectangle with the currently selected pen and brush.
+pub fn round_rect_shape(hdc: isize, l: i32, t: i32, r: i32, b: i32, edge: i32) {
+    unsafe {
+        RoundRect(hdc, l, t, r, b, edge, edge);
+    }
+}
+
+/// Fill `rc` with an opaque `color`.
+pub fn fill_color(hdc: isize, rc: &Rect, color: u32) {
+    unsafe {
+        let brush = CreateSolidBrush(color);
+        if brush != 0 {
+            FillRect(hdc, rc as *const Rect, brush);
+            DeleteObject(brush);
+        }
+    }
+}
+
+pub fn hide_window(hwnd: isize) {
+    unsafe {
+        ShowWindow(hwnd, SW_HIDE);
+    }
+}
+
+/// Re-insert `hwnd` at the top of the topmost band without activating.
+pub fn reassert_topmost(hwnd: isize) {
+    unsafe {
+        SetWindowPos(
+            hwnd,
+            HWND_TOPMOST,
+            0,
+            0,
+            0,
+            0,
+            SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE,
+        );
+    }
+}
+
+/// A top-down 32bpp ARGB DIB bound to a memory DC. GDI draws into `dc`;
+/// the resulting pixels are readable/writable through `bits`.
+pub struct ArgbSurface {
+    pub dc: isize,
+    pub bitmap: isize,
+    pub bits: *mut u32,
+    old_bitmap: isize,
+    pub w: i32,
+    pub h: i32,
+}
+
+impl Drop for ArgbSurface {
+    fn drop(&mut self) {
+        unsafe {
+            if self.dc != 0 {
+                if self.old_bitmap != 0 {
+                    SelectObject(self.dc, self.old_bitmap);
+                }
+                DeleteDC(self.dc);
+            }
+            if self.bitmap != 0 {
+                DeleteObject(self.bitmap);
+            }
+        }
+    }
+}
+
+/// Create a `w` x `h` ARGB surface initialized to transparent black.
+pub fn create_argb_surface(w: i32, h: i32) -> Option<ArgbSurface> {
+    if w <= 0 || h <= 0 {
+        return None;
+    }
+    unsafe {
+        let dc = CreateCompatibleDC(0);
+        if dc == 0 {
+            return None;
+        }
+        let bmi = BitmapInfo {
+            header: BitmapInfoHeader {
+                size: std::mem::size_of::<BitmapInfoHeader>() as u32,
+                width: w,
+                height: -h, // top-down rows
+                planes: 1,
+                bit_count: 32,
+                compression: BI_RGB,
+                size_image: 0,
+                xppm: 0,
+                yppm: 0,
+                clr_used: 0,
+                clr_important: 0,
+            },
+            colors: [0; 4],
+        };
+        let mut bits: *mut c_void = std::ptr::null_mut();
+        let bitmap = CreateDIBSection(
+            dc,
+            &bmi,
+            DIB_RGB_COLORS,
+            &mut bits,
+            0,
+            0,
+        );
+        if bitmap == 0 || bits.is_null() {
+            DeleteDC(dc);
+            return None;
+        }
+        let old_bitmap = SelectObject(dc, bitmap);
+        Some(ArgbSurface {
+            dc,
+            bitmap,
+            bits: bits as *mut u32,
+            old_bitmap,
+            w,
+            h,
+        })
+    }
+}
+
+/// Push `surface` to the layered `hwnd` as premultiplied ARGB, moving the
+/// window to (`x`, `y`) and sizing it to the surface. GDI writes carry no
+/// alpha, so `finalize_argb` must have run first.
+pub fn update_layered_pixels(hwnd: isize, x: i32, y: i32, surface: &ArgbSurface) -> bool {
+    unsafe {
+        GdiFlush();
+        let dst_pt = Point { x, y };
+        let size = Size {
+            cx: surface.w,
+            cy: surface.h,
+        };
+        let src_pt = Point { x: 0, y: 0 };
+        let blend = BlendFunction {
+            blend_op: AC_SRC_OVER,
+            blend_flags: 0,
+            source_constant_alpha: 255,
+            alpha_format: AC_SRC_ALPHA,
+        };
+        UpdateLayeredWindow(
+            hwnd,
+            0,
+            &dst_pt,
+            &size,
+            surface.dc,
+            &src_pt,
+            0,
+            &blend,
+            ULW_ALPHA,
+        ) != 0
     }
 }
 
@@ -427,6 +816,7 @@ unsafe extern "system" fn enum_mon_proc(
             y: r.top,
             w: r.right - r.left,
             h: r.bottom - r.top,
+            primary: info.flags & MONITORINFOF_PRIMARY != 0,
         });
     }
     1 // TRUE = continue
@@ -444,6 +834,23 @@ pub fn enum_monitors() -> Vec<MonitorRect> {
         );
     }
     collector.out
+}
+
+/// The primary monitor (taskbar/default monitor), or the first enumerated
+/// one as a fallback.
+pub fn primary_monitor() -> MonitorRect {
+    let mons = enum_monitors();
+    mons
+        .iter()
+        .find(|m| m.primary)
+        .copied()
+        .unwrap_or_else(|| MonitorRect {
+            x: 0,
+            y: 0,
+            w: 1920,
+            h: 1080,
+            primary: true,
+        })
 }
 
 /// Current window rect (client+frame) or None.

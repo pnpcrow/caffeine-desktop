@@ -11,11 +11,17 @@
 //! process exit (e.g. in a `static`). The pump thread borrows it as
 //! `&'static` under that contract.
 
+use crate::manager::core;
+use crate::settings::{Settings, UnlockKey, UnlockMouse};
 use crate::win32::*;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
 
 const CLASS_NAME_STR: &str = "CaffeineGuardOverlay";
+
+/// Slightly dim gray: readable on the black overlay, yet unobtrusive.
+/// COLORREF layout is 0x00BBGGRR.
+const HINT_COLOR: u32 = 0x0096_9696;
 
 static CLASS_NAME: OnceLock<&'static [u16]> = OnceLock::new();
 static CLASS_ONCE: OnceLock<()> = OnceLock::new();
@@ -38,7 +44,7 @@ unsafe extern "system" fn wnd_proc(
 ) -> isize {
     match msg {
         WM_PAINT => {
-            paint_black(hwnd);
+            paint_blackout(hwnd);
             0
         }
         WM_DISPLAYCHANGE => {
@@ -74,6 +80,49 @@ fn ensure_class(instance: isize) {
         };
         register_class(&cls);
     });
+}
+
+/// Paint one overlay window: full black, plus the dismiss methods as a dim
+/// gray hint centered on the monitor. The whole window is capture-excluded
+/// (`WDA_EXCLUDEFROMCAPTURE`), so the hint — like the blackout — is visible
+/// to the human eye only and never leaks into screenshots or AI vision.
+fn paint_blackout(hwnd: isize) {
+    let mut ps: Paint = unsafe { std::mem::zeroed() };
+    let hdc = begin_paint(hwnd, &mut ps);
+    if hdc != 0 {
+        if let Some(rc) = client_rect(hwnd) {
+            fill_black(hdc, &rc);
+            draw_unlock_hint(hdc, &rc);
+        }
+    }
+    end_paint(hwnd, &ps);
+}
+
+/// One-line summary of how to dismiss, derived from the *current* settings
+/// so a mid-blackout settings change is reflected on the next repaint.
+fn unlock_hint_text(s: &Settings) -> String {
+    let key = match s.unlock_key {
+        UnlockKey::Any => "아무 키나 누르기",
+        UnlockKey::Esc => "ESC 키 누르기",
+        UnlockKey::Space => "스페이스 바 누르기",
+        UnlockKey::Enter => "엔터 키 누르기",
+    };
+    let mut methods = vec![key];
+    match s.unlock_mouse {
+        UnlockMouse::Off => {}
+        UnlockMouse::Move => methods.push("마우스 움직이기"),
+        UnlockMouse::Shake => methods.push("마우스 흔들기"),
+        UnlockMouse::Click => methods.push("마우스 클릭하기"),
+    }
+    format!("화면 가리기 해제: {}", methods.join(" 또는 "))
+}
+
+fn draw_unlock_hint(hdc: isize, rc: &Rect) {
+    let w = rc.right - rc.left;
+    let h = rc.bottom - rc.top;
+    let font_px = (h / 40).clamp(18, 48);
+    let text = unlock_hint_text(&core().settings_snapshot());
+    draw_centered_text(hdc, w / 2, (h - font_px) / 2, &text, font_px, HINT_COLOR);
 }
 
 pub struct OverlayManager {
@@ -239,6 +288,41 @@ fn destroy_created(created: &[isize]) {
 mod tests {
     use super::*;
     use std::time::Duration;
+
+    #[test]
+    fn hint_lists_configured_unlock_methods() {
+        // Defaults: ESC key + shake.
+        let s = Settings::default();
+        assert_eq!(
+            unlock_hint_text(&s),
+            "화면 가리기 해제: ESC 키 누르기 또는 마우스 흔들기"
+        );
+
+        let mut s = Settings::default();
+        s.unlock_mouse = UnlockMouse::Off;
+        assert_eq!(unlock_hint_text(&s), "화면 가리기 해제: ESC 키 누르기");
+
+        s.unlock_key = UnlockKey::Any;
+        s.unlock_mouse = UnlockMouse::Click;
+        assert_eq!(
+            unlock_hint_text(&s),
+            "화면 가리기 해제: 아무 키나 누르기 또는 마우스 클릭하기"
+        );
+
+        s.unlock_mouse = UnlockMouse::Move;
+        s.unlock_key = UnlockKey::Enter;
+        assert_eq!(
+            unlock_hint_text(&s),
+            "화면 가리기 해제: 엔터 키 누르기 또는 마우스 움직이기"
+        );
+
+        s.unlock_key = UnlockKey::Space;
+        s.unlock_mouse = UnlockMouse::Shake;
+        assert_eq!(
+            unlock_hint_text(&s),
+            "화면 가리기 해제: 스페이스 바 누르기 또는 마우스 흔들기"
+        );
+    }
 
     #[test]
     fn show_and_hide_real_windows() {

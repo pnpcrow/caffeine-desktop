@@ -490,11 +490,17 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  OsdPosition dco_decode_osd_position(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return OsdPosition.values[raw as int];
+  }
+
+  @protected
   Settings dco_decode_settings(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 6)
-      throw Exception('unexpected arr length: expect 6 but see ${arr.length}');
+    if (arr.length != 8)
+      throw Exception('unexpected arr length: expect 8 but see ${arr.length}');
     return Settings(
       awakeEnabled: dco_decode_bool(arr[0]),
       autoBlackoutEnabled: dco_decode_bool(arr[1]),
@@ -502,6 +508,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       unlockKey: dco_decode_unlock_key(arr[3]),
       unlockMouse: dco_decode_unlock_mouse(arr[4]),
       startMinimized: dco_decode_bool(arr[5]),
+      osdEnabled: dco_decode_bool(arr[6]),
+      osdPosition: dco_decode_osd_position(arr[7]),
     );
   }
 
@@ -598,6 +606,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  OsdPosition sse_decode_osd_position(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var inner = sse_decode_i_32(deserializer);
+    return OsdPosition.values[inner];
+  }
+
+  @protected
   Settings sse_decode_settings(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var var_awakeEnabled = sse_decode_bool(deserializer);
@@ -606,6 +621,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_unlockKey = sse_decode_unlock_key(deserializer);
     var var_unlockMouse = sse_decode_unlock_mouse(deserializer);
     var var_startMinimized = sse_decode_bool(deserializer);
+    var var_osdEnabled = sse_decode_bool(deserializer);
+    var var_osdPosition = sse_decode_osd_position(deserializer);
     return Settings(
       awakeEnabled: var_awakeEnabled,
       autoBlackoutEnabled: var_autoBlackoutEnabled,
@@ -613,6 +630,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       unlockKey: var_unlockKey,
       unlockMouse: var_unlockMouse,
       startMinimized: var_startMinimized,
+      osdEnabled: var_osdEnabled,
+      osdPosition: var_osdPosition,
     );
   }
 
@@ -728,6 +747,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_osd_position(OsdPosition self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.index, serializer);
+  }
+
+  @protected
   void sse_encode_settings(Settings self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_bool(self.awakeEnabled, serializer);
@@ -736,6 +761,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_unlock_key(self.unlockKey, serializer);
     sse_encode_unlock_mouse(self.unlockMouse, serializer);
     sse_encode_bool(self.startMinimized, serializer);
+    sse_encode_bool(self.osdEnabled, serializer);
+    sse_encode_osd_position(self.osdPosition, serializer);
   }
 
   @protected

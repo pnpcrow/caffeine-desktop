@@ -5,7 +5,8 @@ import 'package:window_manager/window_manager.dart';
 
 import 'src/rust/api.dart' as core;
 import 'src/rust/manager.dart' show Status;
-import 'src/rust/settings.dart' show Settings, UnlockKey, UnlockMouse;
+import 'src/rust/settings.dart'
+    show OsdPosition, Settings, UnlockKey, UnlockMouse;
 import 'theme.dart';
 import 'tray.dart';
 
@@ -18,6 +19,24 @@ const _timeOptions = <int, String>{
   900: '15분',
   1800: '30분',
 };
+
+const _osdGrid = [
+  [OsdPosition.topLeft, OsdPosition.topCenter, OsdPosition.topRight],
+  [OsdPosition.middleLeft, OsdPosition.center, OsdPosition.middleRight],
+  [OsdPosition.bottomLeft, OsdPosition.bottomCenter, OsdPosition.bottomRight],
+];
+
+String _posLabel(OsdPosition p) => switch (p) {
+      OsdPosition.topLeft => '왼쪽 위',
+      OsdPosition.topCenter => '가운데 위',
+      OsdPosition.topRight => '오른쪽 위',
+      OsdPosition.middleLeft => '가운데 왼쪽',
+      OsdPosition.center => '가운데',
+      OsdPosition.middleRight => '가운데 오른쪽',
+      OsdPosition.bottomLeft => '아래 왼쪽',
+      OsdPosition.bottomCenter => '아래 가운데',
+      OsdPosition.bottomRight => '아래 오른쪽',
+    };
 
 String _keyLabel(UnlockKey k) => switch (k) {
       UnlockKey.any => '아무 키나',
@@ -119,6 +138,8 @@ class _SettingsPageState extends State<SettingsPage> with WindowListener {
                         _awakeCard(settings, status),
                         const SizedBox(height: 10),
                         _autoCard(settings),
+                        const SizedBox(height: 10),
+                        _osdCard(settings),
                         const SizedBox(height: 10),
                         _unlockCard(settings),
                         const SizedBox(height: 12),
@@ -382,6 +403,148 @@ class _SettingsPageState extends State<SettingsPage> with WindowListener {
     ));
   }
 
+  Widget _osdCard(Settings s) {
+    final enabled = s.osdEnabled;
+    return _card(Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            const Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('화면 상태 표시 (OSD)',
+                      style: TextStyle(
+                          color: AppTheme.cream,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700)),
+                  SizedBox(height: 4),
+                  Text(
+                      '절전 방지·자동 가림이 켜져 있으면 아주 작은 아이콘으로 알려줍니다. '
+                      '캡처에는 보이지 않고 화면 사용도 막지 않습니다.',
+                      style: TextStyle(color: AppTheme.muted, fontSize: 12)),
+                ],
+              ),
+            ),
+            Switch(
+              value: enabled,
+              activeThumbColor: AppTheme.accent,
+              onChanged: (v) async {
+                setState(() => _settings = _copy(s, osdEnabled: v));
+                await _push();
+              },
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            const Text('표시 위치',
+                style: TextStyle(color: AppTheme.muted, fontSize: 12.5)),
+            Text(_posLabel(s.osdPosition),
+                style: const TextStyle(
+                    color: AppTheme.accent,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700)),
+          ],
+        ),
+        const SizedBox(height: 8),
+        // Grid is inert while the OSD is off.
+        Opacity(
+          opacity: enabled ? 1 : 0.45,
+          child: IgnorePointer(
+            ignoring: !enabled,
+            child: Column(
+              children: [
+                for (final row in _osdGrid) ...[
+                  Row(
+                    children: [
+                      for (final p in row) ...[
+                        Expanded(child: _posCell(s, p)),
+                        if (p != row.last) const SizedBox(width: 8),
+                      ],
+                    ],
+                  ),
+                  if (row != _osdGrid.last) const SizedBox(height: 8),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ],
+    ));
+  }
+
+  /// One 3x3 selector cell: dots laid out the way the OSD itself will be
+  /// (horizontal on top/bottom rows, vertical on the middle sides, a
+  /// crosshair at the center), anchored at the cell's own position.
+  Widget _posCell(Settings s, OsdPosition p) {
+    final selected = s.osdPosition == p;
+    final color = selected ? AppTheme.accent : AppTheme.muted;
+    final dot = Container(
+      width: 4,
+      height: 4,
+      decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+    );
+    final Widget glyph = switch (p) {
+      OsdPosition.middleLeft ||
+      OsdPosition.middleRight =>
+        Column(mainAxisSize: MainAxisSize.min, children: [
+          dot,
+          const SizedBox(height: 3),
+          dot,
+        ]),
+      OsdPosition.center => Icon(Icons.add, size: 15, color: color),
+      _ => Row(mainAxisSize: MainAxisSize.min, children: [
+          dot,
+          const SizedBox(width: 3),
+          dot,
+        ]),
+    };
+    final alignment = switch (p) {
+      OsdPosition.topLeft => Alignment.topLeft,
+      OsdPosition.topCenter => Alignment.topCenter,
+      OsdPosition.topRight => Alignment.topRight,
+      OsdPosition.middleLeft => Alignment.centerLeft,
+      OsdPosition.center => Alignment.center,
+      OsdPosition.middleRight => Alignment.centerRight,
+      OsdPosition.bottomLeft => Alignment.bottomLeft,
+      OsdPosition.bottomCenter => Alignment.bottomCenter,
+      OsdPosition.bottomRight => Alignment.bottomRight,
+    };
+    return Tooltip(
+      message: _posLabel(p),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(8),
+        onTap: () async {
+          setState(() => _settings = _copy(s, osdPosition: p));
+          await _push();
+        },
+        child: Container(
+          height: 38,
+          decoration: BoxDecoration(
+            color: selected
+                ? AppTheme.accent.withValues(alpha: 0.15)
+                : Colors.black.withValues(alpha: 0.22),
+            border: Border.all(
+                color: selected
+                    ? AppTheme.accent
+                    : AppTheme.cardBorder.withValues(alpha: 0.6)),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Align(
+            alignment: alignment,
+            widthFactor: 1,
+            heightFactor: 1,
+            child: Padding(padding: const EdgeInsets.all(6), child: glyph),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _unlockCard(Settings s) {
     return _card(Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -525,6 +688,8 @@ class _SettingsPageState extends State<SettingsPage> with WindowListener {
     int? autoBlackoutSecs,
     UnlockKey? unlockKey,
     UnlockMouse? unlockMouse,
+    bool? osdEnabled,
+    OsdPosition? osdPosition,
   }) {
     return Settings(
       awakeEnabled: awakeEnabled ?? s.awakeEnabled,
@@ -533,6 +698,8 @@ class _SettingsPageState extends State<SettingsPage> with WindowListener {
       unlockKey: unlockKey ?? s.unlockKey,
       unlockMouse: unlockMouse ?? s.unlockMouse,
       startMinimized: s.startMinimized,
+      osdEnabled: osdEnabled ?? s.osdEnabled,
+      osdPosition: osdPosition ?? s.osdPosition,
     );
   }
 }

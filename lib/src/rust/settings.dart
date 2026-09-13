@@ -7,6 +7,19 @@ import 'frb_generated.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
+/// Where the status OSD is anchored on the primary monitor.
+enum OsdPosition {
+  topLeft,
+  topCenter,
+  topRight,
+  middleLeft,
+  center,
+  middleRight,
+  bottomLeft,
+  bottomCenter,
+  bottomRight,
+}
+
 class Settings {
   /// Keep display/system awake via SetThreadExecutionState.
   final bool awakeEnabled;
@@ -26,6 +39,12 @@ class Settings {
   /// Start minimized to tray (settings window hidden).
   final bool startMinimized;
 
+  /// Show the tiny always-on-top status OSD (capture-excluded).
+  final bool osdEnabled;
+
+  /// OSD anchor position (9-way).
+  final OsdPosition osdPosition;
+
   const Settings({
     required this.awakeEnabled,
     required this.autoBlackoutEnabled,
@@ -33,6 +52,8 @@ class Settings {
     required this.unlockKey,
     required this.unlockMouse,
     required this.startMinimized,
+    required this.osdEnabled,
+    required this.osdPosition,
   });
 
   @override
@@ -42,7 +63,9 @@ class Settings {
       autoBlackoutSecs.hashCode ^
       unlockKey.hashCode ^
       unlockMouse.hashCode ^
-      startMinimized.hashCode;
+      startMinimized.hashCode ^
+      osdEnabled.hashCode ^
+      osdPosition.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -54,7 +77,9 @@ class Settings {
           autoBlackoutSecs == other.autoBlackoutSecs &&
           unlockKey == other.unlockKey &&
           unlockMouse == other.unlockMouse &&
-          startMinimized == other.startMinimized;
+          startMinimized == other.startMinimized &&
+          osdEnabled == other.osdEnabled &&
+          osdPosition == other.osdPosition;
 }
 
 /// How the blackout overlay is dismissed via keyboard.

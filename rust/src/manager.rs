@@ -57,6 +57,17 @@ impl Core {
 
     pub(crate) fn emit(&self) {
         let ev = self.status();
+        let (osd_enabled, osd_position) = {
+            let s = self.settings.lock().unwrap();
+            (s.osd_enabled, s.osd_position)
+        };
+        crate::osd::update(crate::osd::OsdState {
+            enabled: osd_enabled,
+            position: osd_position,
+            awake: ev.awake,
+            auto_blackout: ev.auto_blackout,
+            blackout: ev.blackout,
+        });
         if let Ok(mut sinks) = self.sinks.lock() {
             sinks.retain(|s| s.add(ev.clone()).is_ok());
         }
@@ -104,6 +115,9 @@ pub fn init_core() {
     crate::log::log_line(&format!("init_core (v{})", env!("CARGO_PKG_VERSION")));
     let c = core();
     c.apply_awake(c.awake_on.load(Ordering::SeqCst));
+    // Sync the OSD once at startup (before any sink exists) so the indicator
+    // reflects persisted settings immediately, not on the first UI action.
+    c.emit();
     if STARTED.swap(true, Ordering::SeqCst) {
         return;
     }

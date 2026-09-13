@@ -18,6 +18,7 @@ Flutter (lib/) ──FRB──> Rust core (rust/src/)
   설정창(UI)                설정 JSON (%APPDATA%)
   트레이 아이콘/메뉴        절전 방지 (SetThreadExecutionState)
                             블랙아웃 오버레이 (순수 Win32 창, 캡처 제외+클릭스루)
+                            상태 OSD (9방향 작은 아이콘, 캡처 제외+클릭스루)
                             유휴 감지 (GetLastInputInfo) + 자동 가림
                             전역 후크 + 흔들기 해제 판정
 ```
@@ -42,9 +43,10 @@ Flutter (lib/) ──FRB──> Rust core (rust/src/)
 |---|---|
 | 1. 시스템 트레이 상주 + 메뉴 | `lib/tray.dart` — 절전 방지 체크, 지금 화면 가리기, 자동 가리기 체크, 설정 열기, 종료. 좌클릭 = 설정 열기 |
 | 2a. 화면 꺼짐 방지 | `rust/src/awake.rs` — `SetThreadExecutionState` + 30초 재주장 |
-| 2b. 검은색 차단 + 해제 | `rust/src/overlay.rs` + `unlock.rs` — 모니터별 Win32 전체화면 창, 전역 LL 후크, 흔들기 패턴 감지 |
+| 2b. 검은색 차단 + 해제 | `rust/src/overlay.rs` + `unlock.rs` — 모니터별 Win32 전체화면 창, 전역 LL 후크, 흔들기 패턴 감지, 가림 중 화면 중앙에 회색 해제 방법 힌트(설정 기준, 캡처 제외) |
 | 3. 무조작 시 자동 차단 (토글) | `rust/src/idle.rs` + `manager.rs` — 1초 폴링, 기동 후 60초 그레이스 |
 | 4. 설정 (대기 시간, 해제 방법) | 크롬리스 설정창 — 1~30분, 키보드(아무 키/ESC/스페이스/엔터), 마우스(사용 안 함/움직임/흔들기/클릭) |
+| 화면 상태 OSD | `rust/src/osd.rs` — 절전 방지(커피잔)·자동 가림(가린 눈) 아주 작은 아이콘, 9방향 위치 선택(가운데 왼쪽/오른쪽은 세로, 가운데는 십자 에임), 설정에서 켜기/끄기 · 캡처 제외+클릭스루, 가림 중에는 숨김 |
 | 캡처 방지 | `WDA_EXCLUDEFROMCAPTURE` — `Win+Shift+S`로 검증 (눈엔 검게, 결과엔 바탕 그대로) |
 | Computer Use 호환 | `WS_EX_TRANSPARENT \| WS_EX_LAYERED` + 입력 무시 — 에이전트 입력 그대로 통과 |
 
