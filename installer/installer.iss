@@ -1,12 +1,12 @@
 ; Caffeine Desktop — Inno Setup 6 installer script (Flutter build).
 ; Built by scripts\build.ps1 (ISCC.exe):
-;   ISCC installer.iss /DMyAppVersion=0.2.0
+;   ISCC installer.iss /DMyAppVersion=0.2.1
 ; Requires: flutter build output at ..\build\windows\x64\runner\Release\
 ;           VC++ redist staged at staging\vc_redist.x64.exe (tools\fetch_vcredist.ps1)
 #define MyAppName "Caffeine Desktop"
 #define MyAppExe "caffeine_desktop.exe"
 #ifndef MyAppVersion
-  #define MyAppVersion "0.2.0"
+  #define MyAppVersion "0.2.1"
 #endif
 
 [Setup]
@@ -33,7 +33,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
-Name: "startupicon"; Description: "Windows 시작 시 자동 실행"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
+Name: "startupicon"; Description: "Windows 시작 시 자동 실행 (백그라운드)"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
 [Files]
 ; Flutter Windows output (exe + engine + plugin DLLs + flutter_assets).
@@ -44,7 +44,7 @@ Source: "staging\vc_redist.x64.exe"; DestDir: "{tmp}"; Flags: deleteafterinstall
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExe}"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExe}"; Tasks: desktopicon
-Name: "{userstartup}\{#MyAppName}"; Filename: "{app}\{#MyAppExe}"; Tasks: startupicon
+Name: "{userstartup}\{#MyAppName}"; Filename: "{app}\{#MyAppExe}"; Parameters: "--background"; Tasks: startupicon
 
 [Run]
 Filename: "{tmp}\vc_redist.x64.exe"; Parameters: "/quiet /norestart"; StatusMsg: "Visual C++ 런타임 설치 중..."; Flags: skipifdoesntexist; Check: VCRedistNeedsInstall

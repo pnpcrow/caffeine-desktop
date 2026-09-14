@@ -73,3 +73,16 @@ pub fn ensure_single_instance() -> bool {
 pub fn focus_existing_window() -> bool {
     crate::win32::focus_window_by_title("Caffeine Desktop")
 }
+
+/// Whether the Windows startup entry exists. It is the same shortcut the
+/// installer's startup task creates, so both entry points stay in sync.
+pub fn autostart_enabled() -> bool {
+    crate::autostart::is_enabled()
+}
+
+/// Create/remove the startup shortcut. Enabling always launches with
+/// `--background` (tray-only start, no settings window) — identical to
+/// the installer's "Windows 시작 시 자동 실행" entry.
+pub fn set_autostart(on: bool) -> Result<(), String> {
+    crate::autostart::set_enabled(on)
+}

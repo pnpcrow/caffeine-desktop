@@ -46,6 +46,7 @@ Flutter (lib/) ──FRB──> Rust core (rust/src/)
 | 2b. 검은색 차단 + 해제 | `rust/src/overlay.rs` + `unlock.rs` — 모니터별 Win32 전체화면 창, 전역 LL 후크, 흔들기 패턴 감지, 가림 중 화면 중앙에 회색 해제 방법 힌트(설정 기준, 캡처 제외) |
 | 3. 무조작 시 자동 차단 (토글) | `rust/src/idle.rs` + `manager.rs` — 1초 폴링, 기동 후 60초 그레이스 |
 | 4. 설정 (대기 시간, 해제 방법) | 크롬리스 설정창 — 1~30분, 키보드(아무 키/ESC/스페이스/엔터), 마우스(사용 안 함/움직임/흔들기/클릭) |
+| Windows 시작 시 자동 실행 | 설정 화면 토글(`rust/src/autostart.rs`) + 인스톨러 옵션 — 두 경로 모두 같은 시작 폴더 바로가기(`Caffeine Desktop.lnk`)를 관리하고 `--background` 인자로 실행되어 설정창 없이 트레이로 시작. 일반 실행(아이콘 더블클릭)은 기존대로 창 표시 |
 | 화면 상태 OSD | `rust/src/osd.rs` — 절전 방지(커피잔)·자동 가림(가린 눈) 아주 작은 아이콘, 9방향 위치 선택(가운데 왼쪽/오른쪽은 세로, 가운데는 십자 에임), 설정에서 켜기/끄기 · 캡처 제외+클릭스루, 가림 중에는 숨김 |
 | 캡처 방지 | `WDA_EXCLUDEFROMCAPTURE` — `Win+Shift+S`로 검증 (눈엔 검게, 결과엔 바탕 그대로) |
 | Computer Use 호환 | `WS_EX_TRANSPARENT \| WS_EX_LAYERED` + 입력 무시 — 에이전트 입력 그대로 통과 |
@@ -76,6 +77,9 @@ Flutter (lib/) ──FRB──> Rust core (rust/src/)
 
 산출물: `build\windows\x64\runner\Release\caffeine_desktop.exe` (+ 엔진/플러그인 DLL),
 `installer\Output\caffeine-desktop-setup-<버전>.exe` (Inno, 한국어, VC++ redist同梱 검사).
+
+프로세스 표시 이름: exe 파일명은 `caffeine_desktop.exe`를 유지하되, 작업 관리자 등에서는
+버전 리소스의 `FileDescription`(Runner.rc) 기준으로 **Caffeine Desktop**으로 표시된다.
 
 버전 규칙: Rust 크레이트 = Dart `flutter_rust_bridge` = codegen의 **major.minor 일치 필수**
 (현재 2.13). 어기면 codegen이 거부한다.

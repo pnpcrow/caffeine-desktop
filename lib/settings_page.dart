@@ -62,6 +62,7 @@ class SettingsPage extends StatefulWidget {
 class _SettingsPageState extends State<SettingsPage> with WindowListener {
   Settings? _settings;
   Status? _status;
+  bool _autostart = false;
   StreamSubscription<Status>? _sub;
 
   @override
@@ -92,10 +93,12 @@ class _SettingsPageState extends State<SettingsPage> with WindowListener {
   Future<void> _reload() async {
     final s = await core.getSettings();
     final st = await core.getStatus();
+    final autostart = await core.autostartEnabled();
     if (!mounted) return;
     setState(() {
       _settings = s;
       _status = st;
+      _autostart = autostart;
     });
     await trayController.refresh(st);
   }
@@ -140,6 +143,8 @@ class _SettingsPageState extends State<SettingsPage> with WindowListener {
                         _autoCard(settings),
                         const SizedBox(height: 10),
                         _osdCard(settings),
+                        const SizedBox(height: 10),
+                        _autostartCard(),
                         const SizedBox(height: 10),
                         _unlockCard(settings),
                         const SizedBox(height: 12),
@@ -543,6 +548,55 @@ class _SettingsPageState extends State<SettingsPage> with WindowListener {
         ),
       ),
     );
+  }
+
+  /// Startup entry toggle. Writes/removes the same "Caffeine Desktop.lnk"
+  /// the installer's startup task manages (always with --background, i.e.
+  /// boot starts land in the tray without opening this window).
+  Widget _autostartCard() {
+    return _card(Row(
+      children: [
+        const Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('시스템 시작 시 자동 실행',
+                  style: TextStyle(
+                      color: AppTheme.cream,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700)),
+              SizedBox(height: 4),
+              Text(
+                  'Windows가 켜지면 Caffeine Desktop이 백그라운드(트레이)로 자동 시작됩니다. '
+                  '설정 창은 열리지 않습니다.',
+                  style: TextStyle(color: AppTheme.muted, fontSize: 12)),
+            ],
+          ),
+        ),
+        Switch(
+          value: _autostart,
+          activeThumbColor: AppTheme.accent,
+          onChanged: (v) => _setAutostart(v),
+        ),
+      ],
+    ));
+  }
+
+  Future<void> _setAutostart(bool v) async {
+    setState(() => _autostart = v);
+    try {
+      await core.setAutostart(on_: v);
+    } catch (e) {
+      // COM/filesystem failure: reflect the unchanged on-disk state.
+      if (!mounted) return;
+      setState(() => _autostart = !v);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('자동 실행 설정 변경에 실패했습니다: $e'),
+          backgroundColor: AppTheme.bg2,
+        ),
+      );
+    }
   }
 
   Widget _unlockCard(Settings s) {

@@ -43,3 +43,14 @@ Future<bool> ensureSingleInstance() =>
 /// Bring the first instance's settings window forward. Best-effort.
 Future<bool> focusExistingWindow() =>
     RustLib.instance.api.crateApiFocusExistingWindow();
+
+/// Whether the Windows startup entry exists. It is the same shortcut the
+/// installer's startup task creates, so both entry points stay in sync.
+Future<bool> autostartEnabled() =>
+    RustLib.instance.api.crateApiAutostartEnabled();
+
+/// Create/remove the startup shortcut. Enabling always launches with
+/// `--background` (tray-only start, no settings window) — identical to
+/// the installer's "Windows 시작 시 자동 실행" entry.
+Future<void> setAutostart({required bool on_}) =>
+    RustLib.instance.api.crateApiSetAutostart(on_: on_);

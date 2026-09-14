@@ -10,14 +10,22 @@ import 'src/rust/frb_generated.dart';
 import 'theme.dart';
 import 'tray.dart';
 
-Future<void> main() async {
+Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
   await RustLib.init();
   await windowManager.ensureInitialized();
 
+  // Startup-folder entries launch with --background: start in the tray
+  // instead of popping the settings window over the login session. The
+  // runner forwards the command line to this entrypoint (argv[0] skipped).
+  final backgroundLaunch =
+      args.any((a) => a == '--background' || a == '--minimized');
+
   // Single instance: the loser focuses the winner's window and exits.
   if (!await core.ensureSingleInstance()) {
-    await core.focusExistingWindow();
+    if (!backgroundLaunch) {
+      await core.focusExistingWindow();
+    }
     exit(0);
   }
 
@@ -46,7 +54,7 @@ Future<void> main() async {
   // auto-shows on first frame (that would defeat settings.startMinimized),
   // and showing before the first frame flashes an empty window.
   WidgetsBinding.instance.addPostFrameCallback((_) {
-    if (!settings.startMinimized) {
+    if (!settings.startMinimized && !backgroundLaunch) {
       windowManager.show();
     }
   });
