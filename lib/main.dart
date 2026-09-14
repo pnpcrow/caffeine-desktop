@@ -15,6 +15,15 @@ Future<void> main(List<String> args) async {
   await RustLib.init();
   await windowManager.ensureInitialized();
 
+  // True frameless. TitleBarStyle.hidden keeps WS_THICKFRAME, which reserves
+  // an invisible 8px non-client resize border on every side: it reads as a
+  // transparent halo around the UI, and the DWM's own corner rounding then
+  // doubles up against the shell's larger radius. Frameless makes the client
+  // area cover the whole window (single curve); edge resizing is restored by
+  // DragToResizeArea in the app widget below. Note: WindowOptions must not
+  // carry titleBarStyle — setTitleBarStyle() resets the frameless flag.
+  await windowManager.setAsFrameless();
+
   // Startup-folder entries launch with --background: start in the tray
   // instead of popping the settings window over the login session. The
   // runner forwards the command line to this entrypoint (argv[0] skipped).
@@ -39,7 +48,6 @@ Future<void> main(List<String> args) async {
     backgroundColor: Colors.transparent,
     skipTaskbar: false,
     title: 'Caffeine Desktop',
-    titleBarStyle: TitleBarStyle.hidden,
   );
   await windowManager.waitUntilReadyToShow(options, () async {
     await windowManager.setPreventClose(true);
@@ -69,7 +77,10 @@ class CaffeineApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       title: 'Caffeine Desktop',
       theme: AppTheme.dark(),
-      home: const SettingsPage(),
+      // DragToResizeArea: the frameless window has no native resize borders,
+      // so 8px drag strips (edges + corners) are overlaid on the shell. The
+      // top strip also keeps the double-click-to-maximize gesture.
+      home: const DragToResizeArea(child: SettingsPage()),
     );
   }
 }

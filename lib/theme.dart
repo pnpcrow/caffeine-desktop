@@ -191,6 +191,10 @@ class AppTheme {
     );
   }
 
+  /// Root surface of the frameless settings window. The container fills the
+  /// whole window and the window background is transparent, so this radius
+  /// is the *only* visible corner curve (no DWM frame rounding on top of it)
+  /// and the pixels outside it are see-through.
   static BoxDecoration shell() {
     return BoxDecoration(
       gradient: const LinearGradient(
@@ -200,9 +204,6 @@ class AppTheme {
       ),
       border: Border.all(color: cardBorder),
       borderRadius: BorderRadius.circular(18),
-      boxShadow: const [
-        BoxShadow(color: Colors.black54, blurRadius: 24, offset: Offset(0, 12)),
-      ],
     );
   }
 
