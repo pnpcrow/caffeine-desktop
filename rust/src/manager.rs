@@ -67,6 +67,7 @@ impl Core {
             awake: ev.awake,
             auto_blackout: ev.auto_blackout,
             blackout: ev.blackout,
+            find: crate::cursor_find::is_showing(),
         });
         if let Ok(mut sinks) = self.sinks.lock() {
             sinks.retain(|s| s.add(ev.clone()).is_ok());
@@ -98,6 +99,9 @@ impl Core {
     }
 
     pub(crate) fn overlay_show(&self) {
+        // A blackout replaces the find effect; the shake gesture goes back
+        // to meaning "unlock" while the overlay is up.
+        crate::cursor_find::cancel();
         self.overlay.show();
     }
 
@@ -122,17 +126,39 @@ pub fn init_core() {
         return;
     }
 
-    // Consumer: input hooks -> unlock decisions.
+    // Consumer: input hooks -> unlock decisions + cursor-find detection.
     let rx = unlock::install_hooks();
     std::thread::spawn(move || {
         let mut tracker = ShakeTracker::new();
         let mut armed = false;
+        let mut find = crate::cursor_find::FindDetector::new();
         while let Ok(ev) = rx.recv() {
             let c = core();
             if !c.overlay.is_showing() {
                 if armed {
                     armed = false;
                     tracker.reset();
+                }
+                // While no blackout covers the screens, a fast side-to-side
+                // shake is a *find my cursor* gesture instead of an unlock.
+                if let InputEvent::Move(x, y) = ev {
+                    let (enabled, arrows) = {
+                        let s = c.settings.lock().unwrap();
+                        (s.cursor_find_enabled, s.cursor_find_arrows)
+                    };
+                    if enabled {
+                        match find.feed(x, y) {
+                            Some(amplitude) => {
+                                crate::log::log_line(&format!(
+                                    "find-cursor gesture (amplitude {amplitude}px)"
+                                ));
+                                crate::cursor_find::trigger(x, y, amplitude, arrows);
+                            }
+                            None => crate::cursor_find::notify_move(x, y),
+                        }
+                    } else if crate::cursor_find::is_showing() {
+                        crate::cursor_find::cancel();
+                    }
                 }
                 continue;
             }

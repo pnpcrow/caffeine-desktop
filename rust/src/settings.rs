@@ -70,6 +70,13 @@ pub struct Settings {
     /// OSD anchor position (9-way).
     #[serde(default = "default_osd_position")]
     pub osd_position: OsdPosition,
+    /// Shake the pointer side-to-side to spotlight the cursor.
+    #[serde(default = "default_cursor_find_enabled")]
+    pub cursor_find_enabled: bool,
+    /// While spotlighting, monitors without the cursor show an arrow
+    /// pointing toward the monitor that has it.
+    #[serde(default = "default_cursor_find_arrows")]
+    pub cursor_find_arrows: bool,
 }
 
 fn default_osd_enabled() -> bool {
@@ -78,6 +85,14 @@ fn default_osd_enabled() -> bool {
 
 fn default_osd_position() -> OsdPosition {
     OsdPosition::TopRight
+}
+
+fn default_cursor_find_enabled() -> bool {
+    true
+}
+
+fn default_cursor_find_arrows() -> bool {
+    true
 }
 
 impl Default for Settings {
@@ -91,6 +106,8 @@ impl Default for Settings {
             start_minimized: false,
             osd_enabled: true,
             osd_position: OsdPosition::TopRight,
+            cursor_find_enabled: true,
+            cursor_find_arrows: true,
         }
     }
 }
@@ -136,6 +153,8 @@ mod tests {
         assert!(!s.start_minimized);
         assert!(s.osd_enabled);
         assert_eq!(s.osd_position, OsdPosition::TopRight);
+        assert!(s.cursor_find_enabled);
+        assert!(s.cursor_find_arrows);
     }
 
     #[test]
@@ -144,13 +163,18 @@ mod tests {
         s.unlock_key = UnlockKey::Space;
         s.unlock_mouse = UnlockMouse::Click;
         s.osd_position = OsdPosition::MiddleLeft;
+        s.cursor_find_enabled = false;
+        s.cursor_find_arrows = false;
         let text = serde_json::to_string(&s).unwrap();
         assert!(text.contains("\"space\""), "{text}");
         assert!(text.contains("\"click\""), "{text}");
         assert!(text.contains("\"middle_left\""), "{text}");
+        assert!(text.contains("\"cursor_find_enabled\":false"), "{text}");
         let back: Settings = serde_json::from_str(&text).unwrap();
         assert_eq!(back.unlock_key, UnlockKey::Space);
         assert_eq!(back.osd_position, OsdPosition::MiddleLeft);
+        assert!(!back.cursor_find_enabled);
+        assert!(!back.cursor_find_arrows);
         // Unknown/corrupt files fall back to defaults, never crash.
         let fallback: Settings =
             serde_json::from_str("{broken").unwrap_or_default();
@@ -179,5 +203,8 @@ mod tests {
         assert!(s.start_minimized);
         assert!(s.osd_enabled);
         assert_eq!(s.osd_position, OsdPosition::TopRight);
+        // <=0.2.x files predate cursor-find: both knobs fall back to on.
+        assert!(s.cursor_find_enabled);
+        assert!(s.cursor_find_arrows);
     }
 }

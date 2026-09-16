@@ -9,6 +9,7 @@
 pub mod api;
 pub mod autostart;
 pub mod awake;
+pub mod cursor_find;
 #[allow(clippy::all)]
 pub mod frb_generated;
 pub mod idle;

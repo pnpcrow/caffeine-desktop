@@ -307,6 +307,7 @@ extern "system" {
         edge_h: i32,
     ) -> i32;
     fn GdiFlush() -> i32;
+    fn Polygon(hdc: isize, pts: *const Point, count: i32) -> i32;
 }
 
 #[link(name = "kernel32")]
@@ -651,6 +652,13 @@ pub fn ellipse_shape(hdc: isize, l: i32, t: i32, r: i32, b: i32) {
 pub fn round_rect_shape(hdc: isize, l: i32, t: i32, r: i32, b: i32, edge: i32) {
     unsafe {
         RoundRect(hdc, l, t, r, b, edge, edge);
+    }
+}
+
+/// Filled/outlined polygon with the currently selected pen and brush.
+pub fn polygon_shape(hdc: isize, pts: &[Point]) {
+    unsafe {
+        Polygon(hdc, pts.as_ptr(), pts.len() as i32);
     }
 }
 

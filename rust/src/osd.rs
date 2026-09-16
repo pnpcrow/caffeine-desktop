@@ -59,6 +59,8 @@ pub struct OsdState {
     pub auto_blackout: bool,
     /// Blackout currently covering the screens (OSD hides).
     pub blackout: bool,
+    /// Cursor-find effect playing right now (pointer icon).
+    pub find: bool,
 }
 
 impl Default for OsdState {
@@ -69,13 +71,14 @@ impl Default for OsdState {
             awake: false,
             auto_blackout: false,
             blackout: false,
+            find: false,
         }
     }
 }
 
 impl OsdState {
     fn visible(&self) -> bool {
-        self.enabled && (self.awake || self.auto_blackout) && !self.blackout
+        self.enabled && (self.awake || self.auto_blackout || self.find) && !self.blackout
     }
 }
 
@@ -88,17 +91,32 @@ pub(crate) struct Layout {
     pub h: i32,
     pub coffee: Option<(i32, i32)>,
     pub eye: Option<(i32, i32)>,
+    pub pointer: Option<(i32, i32)>,
     pub cross: Option<(i32, i32)>,
 }
 
 /// Icon arrangement for a position. Top/bottom rows run horizontally,
 /// middle-left/right stack vertically, center draws a crosshair with the
-/// icons above and below it (slots reserved so the window never resizes
-/// when a single feature toggles).
-pub(crate) fn layout(pos: OsdPosition, awake: bool, auto: bool) -> Layout {
-    let n = i32::from(awake) + i32::from(auto);
+/// coffee above and eye + pointer below it (slots reserved so the window
+/// never resizes when a single feature toggles). Present icons fill slots
+/// in order (coffee, eye, pointer) so a lone icon always sits inside the
+/// span instead of at a fixed — possibly clipped — position.
+pub(crate) fn layout(pos: OsdPosition, awake: bool, auto: bool, find: bool) -> Layout {
+    let n = i32::from(awake) + i32::from(auto) + i32::from(find);
     // NOTE: i32::saturating_sub saturates at i32::MIN, not 0 — clamp here.
     let span = (n * ICON + (n - 1) * GAP).max(0);
+    let step = ICON + GAP;
+    let mut next = 0;
+    let mut slot = |on: bool| -> Option<i32> {
+        on.then(|| {
+            let s = next;
+            next += step;
+            s
+        })
+    };
+    let coffee_slot = slot(awake);
+    let eye_slot = slot(auto);
+    let pointer_slot = slot(find);
     match pos {
         OsdPosition::TopLeft
         | OsdPosition::TopCenter
@@ -108,26 +126,32 @@ pub(crate) fn layout(pos: OsdPosition, awake: bool, auto: bool) -> Layout {
         | OsdPosition::BottomRight => Layout {
             w: span,
             h: if n > 0 { ICON } else { 0 },
-            coffee: awake.then_some((0, 0)),
-            eye: auto.then_some((ICON + GAP, 0)),
+            coffee: coffee_slot.map(|s| (s, 0)),
+            eye: eye_slot.map(|s| (s, 0)),
+            pointer: pointer_slot.map(|s| (s, 0)),
             cross: None,
         },
         OsdPosition::MiddleLeft | OsdPosition::MiddleRight => Layout {
             w: if n > 0 { ICON } else { 0 },
             h: span,
-            coffee: awake.then_some((0, 0)),
-            eye: auto.then_some((0, ICON + GAP)),
+            coffee: coffee_slot.map(|s| (0, s)),
+            eye: eye_slot.map(|s| (0, s)),
+            pointer: pointer_slot.map(|s| (0, s)),
             cross: None,
         },
         OsdPosition::Center => {
             let w = 2 * CROSS_ARM + 1;
-            let h = 2 * (CROSS_TO_ICON + ICON) + 2 * CROSS_ARM + 1;
+            let top_block = CROSS_TO_ICON + ICON;
+            let eye_y = top_block + 2 * CROSS_ARM + 1 + CROSS_TO_ICON;
+            let pointer_y = eye_y + ICON + GAP;
+            let h = pointer_y + ICON;
             Layout {
                 w,
                 h,
                 coffee: awake.then_some(((w - ICON) / 2, 0)),
-                eye: auto.then_some(((w - ICON) / 2, h - ICON)),
-                cross: Some((w / 2, CROSS_TO_ICON + ICON + CROSS_ARM)),
+                eye: auto.then_some(((w - ICON) / 2, eye_y)),
+                pointer: find.then_some(((w - ICON) / 2, pointer_y)),
+                cross: Some((w / 2, top_block + CROSS_ARM)),
             }
         }
     }
@@ -309,7 +333,7 @@ fn apply() {
         hide_window(hwnd);
         return;
     }
-    let lay = layout(st.position, st.awake, st.auto_blackout);
+    let lay = layout(st.position, st.awake, st.auto_blackout, st.find);
     let mon = primary_monitor();
     let (x, y) = place(&mon, st.position, lay.w, lay.h);
     let Some(surf) = create_argb_surface(lay.w, lay.h) else {
@@ -353,6 +377,9 @@ fn draw_osd(dc: isize, lay: &Layout) {
     }
     if let Some((x, y)) = lay.eye {
         draw_auto_icon(dc, x, y);
+    }
+    if let Some((x, y)) = lay.pointer {
+        draw_find_icon(dc, x, y);
     }
     if let Some((cx, cy)) = lay.cross {
         draw_cross(dc, cx, cy);
@@ -475,6 +502,38 @@ fn draw_cross(dc: isize, cx: i32, cy: i32) {
     }
 }
 
+/// Pointer arrow = cursor-find effect playing. Light fill with a dark rim,
+/// echoing the magnified cursor the effect itself draws.
+fn draw_find_icon(dc: isize, x: i32, y: i32) {
+    // Classic arrow in a ~9x13 box (tip at the origin), so the 1px rim and
+    // the +1 light offset still land inside the 16x16 cell.
+    const BASE: [(i32, i32); 7] = [
+        (0, 0),
+        (0, 11),
+        (2, 8),
+        (5, 13),
+        (7, 12),
+        (5, 8),
+        (9, 8),
+    ];
+    let dark: Vec<Point> = BASE
+        .iter()
+        .map(|&(px, py)| Point { x: x + px + 2, y: y + py + 1 })
+        .collect();
+    let light: Vec<Point> = BASE
+        .iter()
+        .map(|&(px, py)| Point { x: x + px + 3, y: y + py + 2 })
+        .collect();
+    {
+        let _p = Painter::new(dc, Pen::Solid(2, COL_DARK), Brush::Solid(COL_DARK));
+        polygon_shape(dc, &dark);
+    }
+    {
+        let _p = Painter::new(dc, Pen::Solid(1, COL_LIGHT), Brush::Solid(COL_LIGHT));
+        polygon_shape(dc, &light);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -494,11 +553,12 @@ mod tests {
     #[test]
     fn horizontal_rows_lay_icons_side_by_side() {
         for pos in [TopLeft, TopCenter, TopRight, BottomLeft, BottomCenter, BottomRight] {
-            let l = layout(pos, true, true);
-            assert_eq!(l.w, 2 * ICON + GAP, "{pos:?} width");
+            let l = layout(pos, true, true, true);
+            assert_eq!(l.w, 3 * ICON + 2 * GAP, "{pos:?} width");
             assert_eq!(l.h, ICON, "{pos:?} height");
             assert_eq!(l.coffee, Some((0, 0)), "{pos:?} coffee");
             assert_eq!(l.eye, Some((ICON + GAP, 0)), "{pos:?} eye");
+            assert_eq!(l.pointer, Some((2 * (ICON + GAP), 0)), "{pos:?} pointer");
             assert_eq!(l.cross, None, "{pos:?} cross");
         }
     }
@@ -506,36 +566,48 @@ mod tests {
     #[test]
     fn middle_edges_stack_vertically() {
         for pos in [MiddleLeft, MiddleRight] {
-            let l = layout(pos, true, true);
+            let l = layout(pos, true, true, true);
             assert_eq!(l.w, ICON, "{pos:?} width");
-            assert_eq!(l.h, 2 * ICON + GAP, "{pos:?} height");
+            assert_eq!(l.h, 3 * ICON + 2 * GAP, "{pos:?} height");
             assert_eq!(l.coffee, Some((0, 0)), "{pos:?} coffee");
             assert_eq!(l.eye, Some((0, ICON + GAP)), "{pos:?} eye");
+            assert_eq!(l.pointer, Some((0, 2 * (ICON + GAP))), "{pos:?} pointer");
         }
     }
 
     #[test]
     fn center_is_crosshair_with_icons_above_and_below() {
-        let l = layout(Center, true, true);
+        let l = layout(Center, true, true, true);
         assert_eq!(l.w, 2 * CROSS_ARM + 1);
-        assert_eq!(l.h, 2 * (CROSS_TO_ICON + ICON) + 2 * CROSS_ARM + 1);
-        assert_eq!(l.cross, Some((l.w / 2, CROSS_TO_ICON + ICON + CROSS_ARM)));
+        let top_block = CROSS_TO_ICON + ICON;
+        let eye_y = top_block + 2 * CROSS_ARM + 1 + CROSS_TO_ICON;
+        let pointer_y = eye_y + ICON + GAP;
+        assert_eq!(l.h, pointer_y + ICON);
+        assert_eq!(l.cross, Some((l.w / 2, top_block + CROSS_ARM)));
         assert_eq!(l.coffee, Some(((l.w - ICON) / 2, 0)));
-        assert_eq!(l.eye, Some(((l.w - ICON) / 2, l.h - ICON)));
-        // Single-feature center keeps the same window (stable geometry).
-        let one = layout(Center, true, false);
+        assert_eq!(l.eye, Some(((l.w - ICON) / 2, eye_y)));
+        assert_eq!(l.pointer, Some(((l.w - ICON) / 2, pointer_y)));
+        // Fewer features keep the same window (stable geometry): all slots
+        // are reserved even when nothing is drawn in them.
+        let one = layout(Center, true, false, false);
         assert_eq!((one.w, one.h), (l.w, l.h));
         assert_eq!(one.eye, None);
+        assert_eq!(one.pointer, None);
     }
 
     #[test]
     fn single_icon_shrinks_span() {
-        let l = layout(TopRight, true, false);
+        let l = layout(TopRight, true, false, false);
         assert_eq!((l.w, l.h), (ICON, ICON));
-        let none = layout(TopRight, false, false);
+        let find_only = layout(TopRight, false, false, true);
+        assert_eq!((find_only.w, find_only.h), (ICON, ICON));
+        assert_eq!(find_only.coffee, None);
+        assert_eq!(find_only.pointer, Some((0, 0)));
+        let none = layout(TopRight, false, false, false);
         assert_eq!((none.w, none.h), (0, 0));
         assert_eq!(none.coffee, None);
         assert_eq!(none.eye, None);
+        assert_eq!(none.pointer, None);
     }
 
     #[test]
@@ -570,6 +642,7 @@ mod tests {
             awake: true,
             auto_blackout: true,
             blackout: false,
+            find: false,
         };
         assert!(base.visible());
         assert!(!OsdState { enabled: false, ..base }.visible(), "OSD off");
@@ -577,6 +650,7 @@ mod tests {
             !OsdState {
                 awake: false,
                 auto_blackout: false,
+                find: false,
                 ..base
             }
             .visible(),
@@ -585,6 +659,18 @@ mod tests {
         assert!(!OsdState { blackout: true, ..base }.visible(), "during blackout");
         assert!(OsdState { awake: false, ..base }.visible(), "auto only");
         assert!(OsdState { auto_blackout: false, ..base }.visible(), "awake only");
+        // The cursor-find effect alone is worth announcing (e.g. it is the
+        // only signal on the primary monitor when the cursor is elsewhere).
+        assert!(
+            OsdState {
+                awake: false,
+                auto_blackout: false,
+                find: true,
+                ..base
+            }
+            .visible(),
+            "find only"
+        );
     }
 
     #[test]
@@ -609,6 +695,7 @@ mod tests {
             awake: true,
             auto_blackout: true,
             blackout: false,
+            find: false,
         };
         update(base);
 
@@ -621,16 +708,29 @@ mod tests {
             }
         }
         assert_ne!(hwnd, 0, "osd window created");
-        assert!(is_window_visible(hwnd), "osd visible");
 
-        // Anchored at top-right of the primary monitor with margin.
+        // Anchored at top-right of the primary monitor with margin. Re-assert
+        // the state each poll: concurrent tests (e.g. the cursor-find effect
+        // emitting the *real* settings state) can overwrite the shared OSD
+        // cell at any moment.
         let m = primary_monitor();
-        let rc = window_rect(hwnd).expect("osd rect");
         let (w, h) = (2 * ICON + GAP, ICON);
-        assert_eq!(rc.right - rc.left, w, "osd width");
-        assert_eq!(rc.bottom - rc.top, h, "osd height");
-        assert_eq!(rc.right, m.x + m.w - MARGIN, "osd right edge");
-        assert_eq!(rc.top, m.y + MARGIN, "osd top edge");
+        let mut anchored = false;
+        for _ in 0..30 {
+            update(base);
+            std::thread::sleep(Duration::from_millis(100));
+            if let Some(rc) = window_rect(hwnd) {
+                if rc.right - rc.left == w
+                    && rc.bottom - rc.top == h
+                    && rc.right == m.x + m.w - MARGIN
+                    && rc.top == m.y + MARGIN
+                {
+                    anchored = true;
+                    break;
+                }
+            }
+        }
+        assert!(anchored, "osd anchored at top-right");
 
         // Blackout showing -> hidden (but window survives for reuse).
         update(OsdState { blackout: true, ..base });

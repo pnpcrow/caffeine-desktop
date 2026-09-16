@@ -45,6 +45,13 @@ class Settings {
   /// OSD anchor position (9-way).
   final OsdPosition osdPosition;
 
+  /// Shake the pointer side-to-side to spotlight the cursor.
+  final bool cursorFindEnabled;
+
+  /// While spotlighting, monitors without the cursor show an arrow
+  /// pointing toward the monitor that has it.
+  final bool cursorFindArrows;
+
   const Settings({
     required this.awakeEnabled,
     required this.autoBlackoutEnabled,
@@ -54,6 +61,8 @@ class Settings {
     required this.startMinimized,
     required this.osdEnabled,
     required this.osdPosition,
+    required this.cursorFindEnabled,
+    required this.cursorFindArrows,
   });
 
   @override
@@ -65,7 +74,9 @@ class Settings {
       unlockMouse.hashCode ^
       startMinimized.hashCode ^
       osdEnabled.hashCode ^
-      osdPosition.hashCode;
+      osdPosition.hashCode ^
+      cursorFindEnabled.hashCode ^
+      cursorFindArrows.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -79,7 +90,9 @@ class Settings {
           unlockMouse == other.unlockMouse &&
           startMinimized == other.startMinimized &&
           osdEnabled == other.osdEnabled &&
-          osdPosition == other.osdPosition;
+          osdPosition == other.osdPosition &&
+          cursorFindEnabled == other.cursorFindEnabled &&
+          cursorFindArrows == other.cursorFindArrows;
 }
 
 /// How the blackout overlay is dismissed via keyboard.
