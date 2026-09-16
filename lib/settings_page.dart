@@ -144,6 +144,8 @@ class _SettingsPageState extends State<SettingsPage> with WindowListener {
                         const SizedBox(height: 10),
                         _osdCard(settings),
                         const SizedBox(height: 10),
+                        _cursorFindCard(settings),
+                        const SizedBox(height: 10),
                         _autostartCard(),
                         const SizedBox(height: 10),
                         _unlockCard(settings),
@@ -550,6 +552,75 @@ class _SettingsPageState extends State<SettingsPage> with WindowListener {
     );
   }
 
+  /// Shake-to-find-the-cursor: master toggle + the multi-monitor arrow
+  /// hint sub-option (inert while the feature itself is off).
+  Widget _cursorFindCard(Settings s) {
+    final enabled = s.cursorFindEnabled;
+    return _card(Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            const Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('마우스 커서 찾기',
+                      style: TextStyle(
+                          color: AppTheme.cream,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700)),
+                  SizedBox(height: 4),
+                  Text(
+                      '마우스를 좌우로 빠르게 흔들면 커서가 강하게 흔든 만큼 커지면서 '
+                      '주변에 동그란 파동이 퍼져 위치를 바로 찾을 수 있습니다.',
+                      style: TextStyle(color: AppTheme.muted, fontSize: 12)),
+                ],
+              ),
+            ),
+            Switch(
+              value: enabled,
+              activeThumbColor: AppTheme.accent,
+              onChanged: (v) async {
+                setState(() => _settings = _copy(s, cursorFindEnabled: v));
+                await _push();
+              },
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        Opacity(
+          opacity: enabled ? 1 : 0.45,
+          child: IgnorePointer(
+            ignoring: !enabled,
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text('다른 모니터에 방향 화살표 표시',
+                      style: TextStyle(color: AppTheme.muted, fontSize: 12.5)),
+                ),
+                Switch(
+                  value: s.cursorFindArrows,
+                  activeThumbColor: AppTheme.accent,
+                  onChanged: (v) async {
+                    setState(() => _settings = _copy(s, cursorFindArrows: v));
+                    await _push();
+                  },
+                ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 2),
+        Text(
+            '커서가 없는 모니터 가운데에 커서가 있는 모니터 방향의 화살표를 보여 줍니다.',
+            style: TextStyle(
+                color: AppTheme.muted.withValues(alpha: enabled ? 1 : 0.45),
+                fontSize: 11)),
+      ],
+    ));
+  }
+
   /// Startup entry toggle. Writes/removes the same "Caffeine Desktop.lnk"
   /// the installer's startup task manages (always with --background, i.e.
   /// boot starts land in the tray without opening this window).
@@ -744,6 +815,8 @@ class _SettingsPageState extends State<SettingsPage> with WindowListener {
     UnlockMouse? unlockMouse,
     bool? osdEnabled,
     OsdPosition? osdPosition,
+    bool? cursorFindEnabled,
+    bool? cursorFindArrows,
   }) {
     return Settings(
       awakeEnabled: awakeEnabled ?? s.awakeEnabled,
@@ -754,6 +827,8 @@ class _SettingsPageState extends State<SettingsPage> with WindowListener {
       startMinimized: s.startMinimized,
       osdEnabled: osdEnabled ?? s.osdEnabled,
       osdPosition: osdPosition ?? s.osdPosition,
+      cursorFindEnabled: cursorFindEnabled ?? s.cursorFindEnabled,
+      cursorFindArrows: cursorFindArrows ?? s.cursorFindArrows,
     );
   }
 }

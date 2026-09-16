@@ -682,6 +682,48 @@ mod tests {
         assert_eq!(px[2], 0xFF20_2020, "dark colors stay opaque");
     }
 
+    /// Find-only OSD: a lone pointer icon must render (exercises the GDI
+    /// polygon path) inside a one-icon span on the real desktop.
+    #[test]
+    fn osd_shows_find_icon_alone() {
+        enable_per_monitor_dpi();
+        update(OsdState {
+            enabled: true,
+            position: TopRight,
+            awake: false,
+            auto_blackout: false,
+            blackout: false,
+            find: true,
+        });
+        let mut sized = false;
+        for _ in 0..40 {
+            std::thread::sleep(Duration::from_millis(100));
+            let hwnd = find_window_by_title(TITLE);
+            if hwnd != 0 && is_window_visible(hwnd) {
+                if let Some(rc) = window_rect(hwnd) {
+                    // The layered window covers exactly the one-icon span.
+                    if rc.right - rc.left == ICON && rc.bottom - rc.top == ICON {
+                        sized = true;
+                        break;
+                    }
+                }
+            }
+        }
+        assert!(sized, "find-only OSD shows a single pointer-sized icon");
+        // Leave the desktop clean.
+        update(OsdState {
+            enabled: false,
+            ..OsdState::default()
+        });
+        for _ in 0..30 {
+            std::thread::sleep(Duration::from_millis(100));
+            let hwnd = find_window_by_title(TITLE);
+            if hwnd == 0 || !is_window_visible(hwnd) {
+                break;
+            }
+        }
+    }
+
     /// Real desktop smoke test: shows, hides during blackout, position change.
     #[test]
     fn osd_window_show_hide_and_move() {
