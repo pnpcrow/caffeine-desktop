@@ -72,9 +72,34 @@ class _SettingsPageState extends State<SettingsPage> with WindowListener {
     _reload();
     _sub = core.watchEvents().listen((status) async {
       if (!mounted) return;
-      setState(() => _status = status);
+      // Status carries the tray-reachable toggles: mirror them into the
+      // settings snapshot so the switches refresh when a feature is flipped
+      // from the tray while this window is open (the status pills alone
+      // would lag the switches behind the actual state).
+      setState(() {
+        _status = status;
+        _settings = _syncToggles(_settings, status);
+      });
       await trayController.refresh(status);
     });
+  }
+
+  /// Copy `s` with the four Status-backed toggles applied. Returns `s`
+  /// untouched when they already match, so local edits never get clobbered
+  /// by their own round-trip through save → emit → watch.
+  Settings? _syncToggles(Settings? s, Status st) {
+    if (s == null) return null;
+    if (s.awakeEnabled == st.awake &&
+        s.autoBlackoutEnabled == st.autoBlackout &&
+        s.osdEnabled == st.osdEnabled &&
+        s.cursorFindEnabled == st.cursorFindEnabled) {
+      return s;
+    }
+    return _copy(s,
+        awakeEnabled: st.awake,
+        autoBlackoutEnabled: st.autoBlackout,
+        osdEnabled: st.osdEnabled,
+        cursorFindEnabled: st.cursorFindEnabled);
   }
 
   @override
