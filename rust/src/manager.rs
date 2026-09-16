@@ -57,9 +57,9 @@ impl Core {
 
     pub(crate) fn emit(&self) {
         let ev = self.status();
-        let (osd_enabled, osd_position) = {
+        let (osd_enabled, osd_position, cursor_find) = {
             let s = self.settings.lock().unwrap();
-            (s.osd_enabled, s.osd_position)
+            (s.osd_enabled, s.osd_position, s.cursor_find_enabled)
         };
         crate::osd::update(crate::osd::OsdState {
             enabled: osd_enabled,
@@ -67,7 +67,9 @@ impl Core {
             awake: ev.awake,
             auto_blackout: ev.auto_blackout,
             blackout: ev.blackout,
-            find: crate::cursor_find::is_showing(),
+            // Like the coffee/eye icons, the pointer reflects the *setting*,
+            // not the transient effect: on = the feature is armed.
+            find: cursor_find,
         });
         if let Ok(mut sinks) = self.sinks.lock() {
             sinks.retain(|s| s.add(ev.clone()).is_ok());
@@ -142,9 +144,16 @@ pub fn init_core() {
                 // While no blackout covers the screens, a fast side-to-side
                 // shake is a *find my cursor* gesture instead of an unlock.
                 if let InputEvent::Move(x, y) = ev {
-                    let (enabled, arrows) = {
+                    let (enabled, opts) = {
                         let s = c.settings.lock().unwrap();
-                        (s.cursor_find_enabled, s.cursor_find_arrows)
+                        (
+                            s.cursor_find_enabled,
+                            crate::cursor_find::FindOpts {
+                                magnify: s.cursor_find_magnify,
+                                ripple: s.cursor_find_ripple,
+                                arrows: s.cursor_find_arrows,
+                            },
+                        )
                     };
                     if enabled {
                         match find.feed(x, y) {
@@ -152,7 +161,7 @@ pub fn init_core() {
                                 crate::log::log_line(&format!(
                                     "find-cursor gesture (amplitude {amplitude}px)"
                                 ));
-                                crate::cursor_find::trigger(x, y, amplitude, arrows);
+                                crate::cursor_find::trigger(x, y, amplitude, opts);
                             }
                             None => crate::cursor_find::notify_move(x, y),
                         }

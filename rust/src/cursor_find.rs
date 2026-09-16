@@ -15,10 +15,11 @@
 //! shapes) and pushed with `UpdateLayeredWindow` at ~60fps:
 //!
 //! * one *spotlight* window that tracks the cursor: a magnified classic
-//!   arrow (scale follows the measured shake amplitude) over expanding
-//!   circular ripples;
+//!   arrow (scale follows the measured shake amplitude) and/or expanding
+//!   circular ripples — two independently toggleable effects;
 //! * one *arrow* window centered on every monitor that does NOT hold the
-//!   cursor, pointing toward the monitor that does (optional).
+//!   cursor, showing a big solid arrow pointing toward the monitor that
+//!   does (optional).
 //!
 //! The whole effect is human-eyes-only and never blocks input.
 
@@ -59,8 +60,14 @@ const SCALE_MIN: f32 = 1.7;
 const SCALE_MAX: f32 = 3.4;
 /// Amplitude (px) that maps to the magnification ceiling.
 const SCALE_AMP_FULL: f32 = 190.0;
-/// Arrow-hint window edge (px), centered on each foreign monitor.
-const ARROW_SIZE: i32 = 240;
+/// Arrow-hint geometry: total length as a fraction of monitor height,
+/// clamped — big and readable from across the desk.
+const ARROW_MON_FRACTION: f32 = 0.30;
+const ARROW_LEN_MIN: f32 = 240.0;
+const ARROW_LEN_MAX: f32 = 560.0;
+/// Head width and shaft thickness as fractions of the arrow length.
+const ARROW_HEAD_W: f32 = 0.52;
+const ARROW_SHAFT_T: f32 = 0.24;
 /// Monitor topology refresh interval.
 const RECONCILE_MS: u64 = 500;
 /// Fade-to-transparent ramp at the very end of the effect.
@@ -229,8 +236,19 @@ struct RingSpec {
 }
 
 /// Rasterize one spotlight frame into `px` (w*h premultiplied ARGB u32s).
-/// Center of the window == the cursor hotspot.
-fn render_spotlight(px: &mut [u32], w: i32, h: i32, scale: f32, rings: &[RingSpec], master: f32) {
+/// Center of the window == the cursor hotspot. `magnify` draws the enlarged
+/// cursor arrow; `ripple` enables the glow + the `rings` layer (callers
+/// pass an empty slice when it is off).
+fn render_spotlight(
+    px: &mut [u32],
+    w: i32,
+    h: i32,
+    scale: f32,
+    rings: &[RingSpec],
+    master: f32,
+    magnify: bool,
+    ripple: bool,
+) {
     let cx = w as f32 / 2.0;
     let cy = h as f32 / 2.0;
     let poly = arrow_poly(scale);
@@ -262,7 +280,7 @@ fn render_spotlight(px: &mut [u32], w: i32, h: i32, scale: f32, rings: &[RingSpe
 
             // Amber base layer: glow + ripples, additive alpha.
             let mut a_layer = 0.0f32;
-            if d < GLOW_R {
+            if ripple && d < GLOW_R {
                 let k = 1.0 - d / GLOW_R;
                 a_layer += k * k * 0.30;
             }
@@ -281,13 +299,13 @@ fn render_spotlight(px: &mut [u32], w: i32, h: i32, scale: f32, rings: &[RingSpe
             );
 
             // Magnified arrow (white fill, black outline) over the base.
-            if x >= bx0 && x < bx1 && y >= by0 && y < by1 {
+            if magnify && x >= bx0 && x < bx1 && y >= by0 && y < by1 {
                 let lpx = x as f32 + 0.5 - cx;
                 let lpy = y as f32 + 0.5 - cy;
                 let sd = poly_signed_dist(lpx, lpy, &poly);
-                if sd > -1.5 {
-                    let cov_full = (0.5 + sd / 1.5).clamp(0.0, 1.0);
-                    let cov_fill = (0.5 + (sd - outline_w) / 1.5).clamp(0.0, 1.0);
+                if sd > -2.0 {
+                    let cov_full = (0.5 + sd / 2.0).clamp(0.0, 1.0);
+                    let cov_fill = (0.5 + (sd - outline_w) / 2.0).clamp(0.0, 1.0);
                     let a_full = cov_full * master;
                     let a_fill = cov_fill * master;
                     let keep = 1.0 - pa;
@@ -316,41 +334,62 @@ fn pack_premult(r: f32, g: f32, b: f32, a: f32) -> u32 {
         | (b).round() as u32
 }
 
-/// Rasterize one arrow-hint frame: a thick chevron pointing along the unit
-/// vector `dir`, pulsing with `pulse` (0..1), faded by `master`.
-fn render_arrow(px: &mut [u32], w: i32, h: i32, dir: (f32, f32), pulse: f32, master: f32) {
-    let c = (w as f32 / 2.0, h as f32 / 2.0);
-    let (ux, uy) = dir;
-    let (pxv, pyv) = (-uy, ux); // perpendicular
-    let l = 62.0 * (0.94 + 0.10 * pulse);
-    let half = 46.0 * (0.94 + 0.10 * pulse);
-    let thick = 15.0;
-    let tip = (c.0 + ux * l, c.1 + uy * l);
-    let a1 = (c.0 - ux * l * 0.5 + pxv * half, c.1 - uy * l * 0.5 + pyv * half);
-    let a2 = (c.0 - ux * l * 0.5 - pxv * half, c.1 - uy * l * 0.5 - pyv * half);
-    let alpha_w = (185.0 + 60.0 * pulse) / 255.0 * master;
+/// Window side (px) and arrow length for a monitor-hint arrow, derived
+/// from the monitor height so the hint reads at any resolution.
+pub(crate) fn arrow_geometry(mon_h: i32) -> (i32, f32) {
+    let l = (mon_h as f32 * ARROW_MON_FRACTION).clamp(ARROW_LEN_MIN, ARROW_LEN_MAX);
+    // The rotated bounding box is largest at 45°: (l + head_w) / sqrt(2).
+    let side = ((l * (1.0 + ARROW_HEAD_W)) * std::f32::consts::FRAC_1_SQRT_2).ceil() as i32 + 12;
+    (side, l)
+}
 
-    for y in 0..h {
-        for x in 0..w {
-            let fx = x as f32 + 0.5;
-            let fy = y as f32 + 0.5;
-            let d1 = seg_dist(fx, fy, tip.0, tip.1, a1.0, a1.1);
-            let d2 = seg_dist(fx, fy, tip.0, tip.1, a2.0, a2.1);
-            let d = d1.min(d2);
-            // White chevron with a soft dark halo around it.
-            let a_white = (0.5 + (thick / 2.0 - d) / 1.5).clamp(0.0, 1.0) * alpha_w;
-            let a_halo = (0.5 + (thick / 2.0 + 4.0 - d) / 2.5)
-                .clamp(0.0, 1.0)
-                .min(1.0)
-                * 0.75
-                * master
-                * (1.0 - a_white);
-            let pa = (a_white + a_halo).min(1.0);
-            let pr = 255.0 * a_white;
-            let pg = 255.0 * a_white;
-            let pb = 255.0 * a_white;
-            let i = (y * w + x) as usize;
-            px[i] = pack_premult(pr, pg, pb, pa);
+/// Solid arrow polygon (7-gon: rectangular shaft + triangular head),
+/// pointing along the unit vector `dir`, centered at the window's middle,
+/// scaled by the pulse factor. Coordinates are window-local.
+fn arrow_body(side: i32, dir: (f32, f32), l: f32, pulse: f32) -> [(f32, f32); 7] {
+    let k = 0.95 + 0.10 * pulse;
+    let len = l * k;
+    let hw = l * ARROW_HEAD_W * k;
+    let st = l * ARROW_SHAFT_T * k;
+    let head_len = len * 0.30;
+    let half = len / 2.0;
+    let mut pts = [(0.0f32, 0.0f32); 7];
+    let local = [
+        (-half, -st / 2.0),
+        (half - head_len, -st / 2.0),
+        (half - head_len, -hw / 2.0),
+        (half, 0.0),
+        (half - head_len, hw / 2.0),
+        (half - head_len, st / 2.0),
+        (-half, st / 2.0),
+    ];
+    let c = side as f32 / 2.0;
+    for (i, &(x, y)) in local.iter().enumerate() {
+        pts[i] = (c + x * dir.0 - y * dir.1, c + x * dir.1 + y * dir.0);
+    }
+    pts
+}
+
+/// Rasterize one monitor-hint frame: a big solid arrow (white body, dark
+/// rim) pointing along `dir`, gently pulsing in size and opacity.
+fn render_arrow(px: &mut [u32], side: i32, dir: (f32, f32), l: f32, pulse: f32, master: f32) {
+    let poly = arrow_body(side, dir, l, pulse);
+    let outline_w = (l * 0.03).max(5.0);
+    let alpha_w = (0.86 + 0.12 * pulse) * master;
+
+    for y in 0..side {
+        for x in 0..side {
+            let sd = poly_signed_dist(x as f32 + 0.5, y as f32 + 0.5, &poly);
+            let mut out = 0u32;
+            if sd > -2.0 {
+                let cov_full = (0.5 + sd / 2.0).clamp(0.0, 1.0);
+                let cov_fill = (0.5 + (sd - outline_w) / 2.0).clamp(0.0, 1.0);
+                let a_full = cov_full * alpha_w;
+                let a_fill = cov_fill * alpha_w;
+                out = pack_premult(255.0 * a_fill, 255.0 * a_fill, 255.0 * a_fill, a_full);
+            }
+            let i = (y * side + x) as usize;
+            px[i] = out;
         }
     }
 }
@@ -358,15 +397,41 @@ fn render_arrow(px: &mut [u32], w: i32, h: i32, dir: (f32, f32), pulse: f32, mas
 // --- process-wide controller -----------------------------------------------------
 
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU64, Ordering};
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
+
+/// Which sub-effects a trigger runs; snapshotted from the settings at
+/// trigger time so mid-effect setting changes apply on the next trigger.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FindOpts {
+    /// Enlarge the cursor itself (scales with shake strength).
+    pub magnify: bool,
+    /// Circular ripple waves around the cursor.
+    pub ripple: bool,
+    /// Solid direction arrows on the monitors without the cursor.
+    pub arrows: bool,
+}
+
+impl Default for FindOpts {
+    fn default() -> Self {
+        FindOpts {
+            magnify: true,
+            ripple: true,
+            arrows: true,
+        }
+    }
+}
 
 static ACTIVE: AtomicBool = AtomicBool::new(false);
 static CURSOR_X: AtomicI32 = AtomicI32::new(0);
 static CURSOR_Y: AtomicI32 = AtomicI32::new(0);
 static AMPLITUDE: AtomicI32 = AtomicI32::new(0);
 static DEADLINE: AtomicU64 = AtomicU64::new(0);
-static ARROWS_ON: AtomicBool = AtomicBool::new(false);
 static THREAD_STARTED: AtomicBool = AtomicBool::new(false);
+static OPTS: Mutex<FindOpts> = Mutex::new(FindOpts {
+    magnify: true,
+    ripple: true,
+    arrows: true,
+});
 
 static CLASS_NAME: OnceLock<&'static [u16]> = OnceLock::new();
 static CLASS_ONCE: OnceLock<()> = OnceLock::new();
@@ -405,13 +470,15 @@ unsafe extern "system" fn wnd_proc(
 }
 
 /// Fire (or re-fire) the find effect at the cursor. `amplitude` is the
-/// measured shake amplitude in px (drives magnification); `arrows` is the
-/// current arrow-hint setting snapshot.
-pub fn trigger(x: i32, y: i32, amplitude: i32, arrows: bool) {
+/// measured shake amplitude in px (drives magnification); `opts` selects
+/// which sub-effects run.
+pub fn trigger(x: i32, y: i32, amplitude: i32, opts: FindOpts) {
     CURSOR_X.store(x, Ordering::SeqCst);
     CURSOR_Y.store(y, Ordering::SeqCst);
     AMPLITUDE.store(amplitude, Ordering::SeqCst);
-    ARROWS_ON.store(arrows, Ordering::SeqCst);
+    if let Ok(mut o) = OPTS.lock() {
+        *o = opts;
+    }
     DEADLINE.store(tick_ms() as u64 + HOLD_MS, Ordering::SeqCst);
     ACTIVE.store(true, Ordering::SeqCst);
     if !THREAD_STARTED.swap(true, Ordering::SeqCst) {
@@ -440,13 +507,15 @@ struct ArrowWin {
     mon_idx: usize,
     hwnd: isize,
     dir: (f32, f32),
+    side: i32,
+    length: f32,
+    surf: ArgbSurface,
 }
 
 struct Effect {
     started: u64,
     spot: isize,
     spot_surf: ArgbSurface,
-    arrow_surf: ArgbSurface,
     arrows: Vec<ArrowWin>,
     monitors: Vec<MonitorRect>,
     cursor_mon: usize,
@@ -481,7 +550,6 @@ fn create_effect_window(title: &str, w: i32, h: i32, instance: isize) -> isize {
 impl Effect {
     fn create(instance: isize, now: u64) -> Option<Effect> {
         let spot_surf = create_argb_surface(SPOT_SIZE, SPOT_SIZE)?;
-        let arrow_surf = create_argb_surface(ARROW_SIZE, ARROW_SIZE)?;
         let spot = create_effect_window(SPOT_TITLE, SPOT_SIZE, SPOT_SIZE, instance);
         if spot == 0 {
             return None;
@@ -490,7 +558,6 @@ impl Effect {
             started: now,
             spot,
             spot_surf,
-            arrow_surf,
             arrows: Vec::new(),
             monitors: Vec::new(),
             cursor_mon: 0,
@@ -522,7 +589,8 @@ impl Effect {
             })
             .unwrap_or(0);
 
-        let want_arrows = ARROWS_ON.load(Ordering::SeqCst) && self.monitors.len() > 1;
+        let opts = *OPTS.lock().unwrap();
+        let want_arrows = opts.arrows && self.monitors.len() > 1;
         if !want_arrows {
             self.destroy_arrows();
             return;
@@ -553,18 +621,25 @@ impl Effect {
             match self.arrows.iter_mut().find(|a| a.mon_idx == i) {
                 Some(a) => a.dir = dir,
                 None => {
+                    let (side, length) = arrow_geometry(self.monitors[i].h);
                     let hwnd = create_effect_window(
                         &format!("{ARROW_TITLE}-{i}"),
-                        ARROW_SIZE,
-                        ARROW_SIZE,
+                        side,
+                        side,
                         instance,
                     );
                     if hwnd != 0 {
-                        self.arrows.push(ArrowWin {
-                            mon_idx: i,
-                            hwnd,
-                            dir,
-                        });
+                        match create_argb_surface(side, side) {
+                            Some(surf) => self.arrows.push(ArrowWin {
+                                mon_idx: i,
+                                hwnd,
+                                dir,
+                                side,
+                                length,
+                                surf,
+                            }),
+                            None => destroy_window(hwnd),
+                        }
                     }
                 }
             }
@@ -582,9 +657,12 @@ impl Effect {
         if self.monitors.is_empty() {
             return;
         }
+        let opts = *OPTS.lock().unwrap();
         // Smooth toward the latest measured amplitude.
-        let target = amplitude_to_scale(AMPLITUDE.load(Ordering::SeqCst));
-        self.scale += (target - self.scale) * 0.12;
+        if opts.magnify {
+            let target = amplitude_to_scale(AMPLITUDE.load(Ordering::SeqCst));
+            self.scale += (target - self.scale) * 0.12;
+        }
 
         let deadline = DEADLINE.load(Ordering::SeqCst);
         let master = if deadline > now {
@@ -599,19 +677,22 @@ impl Effect {
             self.rings.push(self.next_ring);
             self.next_ring += RING_SPAWN_MS;
         }
-        let rings: Vec<RingSpec> = self
-            .rings
-            .iter()
-            .map(|&t| {
-                let prog = (now.saturating_sub(t) as f32 / RING_LIFE_MS as f32).min(1.0);
-                let eased = 1.0 - (1.0 - prog) * (1.0 - prog); // ease-out
-                RingSpec {
-                    r: RING_R0 + (RING_R1 - RING_R0) * eased,
-                    width: 2.6 + 1.6 * (1.0 - prog),
-                    alpha: (1.0 - prog).powi(2) * 0.85,
-                }
-            })
-            .collect();
+        let rings: Vec<RingSpec> = if opts.ripple {
+            self.rings
+                .iter()
+                .map(|&t| {
+                    let prog = (now.saturating_sub(t) as f32 / RING_LIFE_MS as f32).min(1.0);
+                    let eased = 1.0 - (1.0 - prog) * (1.0 - prog); // ease-out
+                    RingSpec {
+                        r: RING_R0 + (RING_R1 - RING_R0) * eased,
+                        width: 2.6 + 1.6 * (1.0 - prog),
+                        alpha: (1.0 - prog).powi(2) * 0.85,
+                    }
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
 
         // Spotlight follows the cursor.
         let (cx, cy) = (
@@ -627,6 +708,8 @@ impl Effect {
             self.scale,
             &rings,
             master,
+            opts.magnify,
+            opts.ripple,
         );
         update_layered_pixels(
             self.spot,
@@ -648,23 +731,20 @@ impl Effect {
         for a in &self.arrows {
             render_arrow(
                 unsafe {
-                    std::slice::from_raw_parts_mut(
-                        self.arrow_surf.bits,
-                        (ARROW_SIZE * ARROW_SIZE) as usize,
-                    )
+                    std::slice::from_raw_parts_mut(a.surf.bits, (a.side * a.side) as usize)
                 },
-                ARROW_SIZE,
-                ARROW_SIZE,
+                a.side,
                 a.dir,
+                a.length,
                 pulse,
                 master,
             );
             let mon = &self.monitors[a.mon_idx];
             update_layered_pixels(
                 a.hwnd,
-                mon.x + (mon.w - ARROW_SIZE) / 2,
-                mon.y + (mon.h - ARROW_SIZE) / 2,
-                &self.arrow_surf,
+                mon.x + (mon.w - a.side) / 2,
+                mon.y + (mon.h - a.side) / 2,
+                &a.surf,
             );
             show_noactivate(a.hwnd);
         }
@@ -699,7 +779,7 @@ fn find_thread() {
             if ACTIVE.load(Ordering::SeqCst) {
                 fx = Effect::create(instance, now);
                 match fx {
-                    Some(_) => crate::manager::core().emit(),
+                    Some(_) => {}
                     None => {
                         ACTIVE.store(false, Ordering::SeqCst);
                         continue;
@@ -717,7 +797,6 @@ fn find_thread() {
                 ACTIVE.store(true, Ordering::SeqCst);
             } else {
                 fx = None; // Drop destroys the windows.
-                crate::manager::core().emit();
                 continue;
             }
         }
@@ -899,7 +978,7 @@ mod tests {
             width: 3.0,
             alpha: 0.6,
         }];
-        render_spotlight(&mut px, w, w, 2.5, &rings, 1.0);
+        render_spotlight(&mut px, w, w, 2.5, &rings, 1.0, true, true);
         for v in &px {
             let a = v >> 24;
             let r = (v >> 16) & 0xFF;
@@ -923,30 +1002,103 @@ mod tests {
     }
 
     #[test]
-    fn arrow_frame_points_and_pulses() {
-        let w = ARROW_SIZE;
+    fn spotlight_respects_effect_toggles() {
+        let w = SPOT_SIZE;
         let c = (w / 2) as usize;
-        // Pointing east: tip at (c+62, c), arms back to (c-31, c±46).
-        let at = |px: &[u32], x: usize, y: usize| px[y * w as usize + x];
+        let rings = [RingSpec {
+            r: 100.0,
+            width: 3.0,
+            alpha: 0.6,
+        }];
+        // Magnify off: the arrow's spot may still carry the amber glow, but
+        // there must be no opaque white arrow body on top of it.
         let mut px = vec![0u32; (w * w) as usize];
-        render_arrow(&mut px, w, w, (1.0, 0.0), 0.5, 1.0);
-        assert!(at(&px, c + 62, c) >> 24 > 150, "tip on the chevron");
-        assert!(at(&px, c + 15, c + 23) >> 24 > 150, "lower arm midpoint");
-        assert!(at(&px, c + 15, c - 23) >> 24 > 150, "upper arm midpoint");
-        assert_eq!(at(&px, 10, 10), 0, "far off the chevron");
+        render_spotlight(&mut px, w, w, 2.5, &rings, 1.0, false, true);
+        let ax = c + (3.0 * 2.5) as usize;
+        let ay = c + (5.0 * 2.5) as usize;
+        let v = px[ay * w as usize + ax];
+        assert!(
+            (v >> 24) < 100 && ((v >> 16) & 0xFF) < 180,
+            "no white arrow when magnify off, got {v:#010x}"
+        );
+        // Ripple off (no glow, no rings): only the arrow remains.
+        let mut px = vec![0u32; (w * w) as usize];
+        render_spotlight(&mut px, w, w, 2.5, &[], 1.0, true, false);
+        assert_eq!(px[c * w as usize + (c + 100)] >> 24, 0, "no ring layer");
+        // Probe 60px above center: inside the glow radius but well outside
+        // the (magnify-on) arrow polygon, so only the glow could paint it.
+        let glow = px[(c - 60) * w as usize + c];
+        assert_eq!(glow >> 24, 0, "no glow when ripple off");
+        let ax = c + (3.0 * 2.5) as usize;
+        let ay = c + (5.0 * 2.5) as usize;
+        assert!(
+            (px[ay * w as usize + ax] >> 24) > 200,
+            "arrow still drawn when ripple off"
+        );
+    }
+
+    #[test]
+    fn arrow_geometry_scales_with_monitor() {
+        let (s_1080, l_1080) = arrow_geometry(1080);
+        assert!((l_1080 - 324.0).abs() < 1.0, "30% of 1080p height");
+        // The window must fit the arrow rotated to any of the 8 directions.
+        let hw = l_1080 * ARROW_HEAD_W * 1.05; // max pulse scale
+        let need = (l_1080 + hw) * std::f32::consts::FRAC_1_SQRT_2;
+        assert!(
+            s_1080 as f32 >= need,
+            "side {s_1080} must cover the rotated bbox {need}"
+        );
+        // Clamped at the ceiling on 4K, at the floor on tiny screens.
+        let (_, l_4k) = arrow_geometry(2160);
+        assert!((l_4k - ARROW_LEN_MAX).abs() < 1.0);
+        let (_, l_small) = arrow_geometry(400);
+        assert!((l_small - ARROW_LEN_MIN).abs() < 1.0);
+    }
+
+    #[test]
+    fn arrow_frame_points_and_pulses() {
+        let (side, l) = arrow_geometry(1080);
+        let c = (side / 2) as usize;
+        let at = |px: &[u32], x: usize, y: usize| px[y * side as usize + x];
+        // Pointing east: tip near (c + l/2, c), mid-shaft near (c - l/4, c).
+        let mut px = vec![0u32; (side * side) as usize];
+        render_arrow(&mut px, side, (1.0, 0.0), l, 0.5, 1.0);
+        let tip_x = (c as f32 + l * 0.47) as usize;
+        assert!(at(&px, tip_x, c) >> 24 > 150, "near the tip");
+        let shaft_x = (c as f32 - l * 0.25) as usize;
+        let shaft_px = at(&px, shaft_x, c);
+        assert!(shaft_px >> 24 > 150, "mid-shaft solid");
+        assert!(
+            ((shaft_px >> 16) & 0xFF) > 200,
+            "shaft body is white, got {shaft_px:#010x}"
+        );
+        assert_eq!(at(&px, 10, 10), 0, "far off the arrow");
+        // Below the shaft but inside the head span: head wing is filled.
+        let wing_y = (c as f32 + l * 0.15) as usize;
+        let wing_x = (c as f32 + l * 0.30) as usize;
+        assert!(at(&px, wing_x, wing_y) >> 24 > 100, "head wing filled");
         // master=0 fades everything out.
-        render_arrow(&mut px, w, w, (1.0, 0.0), 0.5, 0.0);
-        assert_eq!(at(&px, c + 62, c), 0, "master fade to nothing");
+        render_arrow(&mut px, side, (1.0, 0.0), l, 0.5, 0.0);
+        assert_eq!(at(&px, shaft_x, c), 0, "master fade to nothing");
     }
 
     // real windows --------------------------------------------------------------
 
     #[test]
     fn effect_windows_appear_and_expire() {
+        let _g = crate::testsupport::window_test_lock();
         enable_per_monitor_dpi();
         let m = primary_monitor();
         let start = tick_ms() as u64;
-        trigger(m.x + m.w / 2, m.y + m.h / 2, 140, false);
+        trigger(
+            m.x + m.w / 2,
+            m.y + m.h / 2,
+            140,
+            FindOpts {
+                arrows: false,
+                ..FindOpts::default()
+            },
+        );
 
         // Spotlight window appears, tracking the cursor position.
         let mut hwnd = 0;
@@ -962,7 +1114,15 @@ mod tests {
 
         // Re-trigger refreshes position and extends the deadline.
         std::thread::sleep(Duration::from_millis(150));
-        trigger(m.x + m.w / 4, m.y + m.h / 2, 200, false);
+        trigger(
+            m.x + m.w / 4,
+            m.y + m.h / 2,
+            200,
+            FindOpts {
+                arrows: false,
+                ..FindOpts::default()
+            },
+        );
         let mut moved = false;
         for _ in 0..30 {
             std::thread::sleep(Duration::from_millis(50));

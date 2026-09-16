@@ -20,3 +20,16 @@ pub mod overlay;
 pub mod settings;
 pub mod unlock;
 pub mod win32;
+
+#[cfg(test)]
+pub(crate) mod testsupport {
+    use std::sync::{Mutex, MutexGuard, OnceLock};
+
+    /// Serializes tests that create real Win32 windows or share the global
+    /// OSD/blackout state: cargo test runs them on parallel threads inside
+    /// one process, and FindWindow/state cells are process-global.
+    pub(crate) fn window_test_lock() -> MutexGuard<'static, ()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(())).lock().unwrap_or_else(|e| e.into_inner())
+    }
+}

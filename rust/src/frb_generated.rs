@@ -603,6 +603,8 @@ impl SseDecode for crate::settings::Settings {
         let mut var_osdEnabled = <bool>::sse_decode(deserializer);
         let mut var_osdPosition = <crate::settings::OsdPosition>::sse_decode(deserializer);
         let mut var_cursorFindEnabled = <bool>::sse_decode(deserializer);
+        let mut var_cursorFindMagnify = <bool>::sse_decode(deserializer);
+        let mut var_cursorFindRipple = <bool>::sse_decode(deserializer);
         let mut var_cursorFindArrows = <bool>::sse_decode(deserializer);
         return crate::settings::Settings {
             awake_enabled: var_awakeEnabled,
@@ -614,6 +616,8 @@ impl SseDecode for crate::settings::Settings {
             osd_enabled: var_osdEnabled,
             osd_position: var_osdPosition,
             cursor_find_enabled: var_cursorFindEnabled,
+            cursor_find_magnify: var_cursorFindMagnify,
+            cursor_find_ripple: var_cursorFindRipple,
             cursor_find_arrows: var_cursorFindArrows,
         };
     }
@@ -763,6 +767,8 @@ impl flutter_rust_bridge::IntoDart for crate::settings::Settings {
             self.osd_enabled.into_into_dart().into_dart(),
             self.osd_position.into_into_dart().into_dart(),
             self.cursor_find_enabled.into_into_dart().into_dart(),
+            self.cursor_find_magnify.into_into_dart().into_dart(),
+            self.cursor_find_ripple.into_into_dart().into_dart(),
             self.cursor_find_arrows.into_into_dart().into_dart(),
         ]
         .into_dart()
@@ -914,6 +920,8 @@ impl SseEncode for crate::settings::Settings {
         <bool>::sse_encode(self.osd_enabled, serializer);
         <crate::settings::OsdPosition>::sse_encode(self.osd_position, serializer);
         <bool>::sse_encode(self.cursor_find_enabled, serializer);
+        <bool>::sse_encode(self.cursor_find_magnify, serializer);
+        <bool>::sse_encode(self.cursor_find_ripple, serializer);
         <bool>::sse_encode(self.cursor_find_arrows, serializer);
     }
 }

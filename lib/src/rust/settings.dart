@@ -48,8 +48,14 @@ class Settings {
   /// Shake the pointer side-to-side to spotlight the cursor.
   final bool cursorFindEnabled;
 
-  /// While spotlighting, monitors without the cursor show an arrow
-  /// pointing toward the monitor that has it.
+  /// While finding: magnify the cursor itself (scales with shake strength).
+  final bool cursorFindMagnify;
+
+  /// While finding: circular ripple waves around the cursor.
+  final bool cursorFindRipple;
+
+  /// While finding, monitors without the cursor show an arrow pointing
+  /// toward the monitor that has it.
   final bool cursorFindArrows;
 
   const Settings({
@@ -62,6 +68,8 @@ class Settings {
     required this.osdEnabled,
     required this.osdPosition,
     required this.cursorFindEnabled,
+    required this.cursorFindMagnify,
+    required this.cursorFindRipple,
     required this.cursorFindArrows,
   });
 
@@ -76,6 +84,8 @@ class Settings {
       osdEnabled.hashCode ^
       osdPosition.hashCode ^
       cursorFindEnabled.hashCode ^
+      cursorFindMagnify.hashCode ^
+      cursorFindRipple.hashCode ^
       cursorFindArrows.hashCode;
 
   @override
@@ -92,6 +102,8 @@ class Settings {
           osdEnabled == other.osdEnabled &&
           osdPosition == other.osdPosition &&
           cursorFindEnabled == other.cursorFindEnabled &&
+          cursorFindMagnify == other.cursorFindMagnify &&
+          cursorFindRipple == other.cursorFindRipple &&
           cursorFindArrows == other.cursorFindArrows;
 }
 

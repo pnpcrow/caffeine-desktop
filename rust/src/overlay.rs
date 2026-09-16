@@ -326,6 +326,7 @@ mod tests {
 
     #[test]
     fn show_and_hide_real_windows() {
+        let _g = crate::testsupport::window_test_lock();
         // Match the overlay thread's DPI context: without this, Win32
         // virtualizes this thread's GetWindowRect into logical pixels while
         // monitor enumeration stays physical, and the geometry asserts flap

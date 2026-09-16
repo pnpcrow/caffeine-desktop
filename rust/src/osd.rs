@@ -59,7 +59,8 @@ pub struct OsdState {
     pub auto_blackout: bool,
     /// Blackout currently covering the screens (OSD hides).
     pub blackout: bool,
-    /// Cursor-find effect playing right now (pointer icon).
+    /// Cursor-find feature enabled in settings (pointer icon, persistent
+    /// like the coffee/eye icons — not tied to the transient effect).
     pub find: bool,
 }
 
@@ -659,8 +660,8 @@ mod tests {
         assert!(!OsdState { blackout: true, ..base }.visible(), "during blackout");
         assert!(OsdState { awake: false, ..base }.visible(), "auto only");
         assert!(OsdState { auto_blackout: false, ..base }.visible(), "awake only");
-        // The cursor-find effect alone is worth announcing (e.g. it is the
-        // only signal on the primary monitor when the cursor is elsewhere).
+        // The cursor-find toggle alone still lights the OSD pointer icon —
+        // same "feature armed" semantics as the coffee and eye icons.
         assert!(
             OsdState {
                 awake: false,
@@ -686,17 +687,20 @@ mod tests {
     /// polygon path) inside a one-icon span on the real desktop.
     #[test]
     fn osd_shows_find_icon_alone() {
+        let _g = crate::testsupport::window_test_lock();
         enable_per_monitor_dpi();
-        update(OsdState {
-            enabled: true,
-            position: TopRight,
-            awake: false,
-            auto_blackout: false,
-            blackout: false,
-            find: true,
-        });
         let mut sized = false;
         for _ in 0..40 {
+            // Re-assert each poll: sibling OSD tests overwrite the shared
+            // state cell, so a passive wait would race them.
+            update(OsdState {
+                enabled: true,
+                position: TopRight,
+                awake: false,
+                auto_blackout: false,
+                blackout: false,
+                find: true,
+            });
             std::thread::sleep(Duration::from_millis(100));
             let hwnd = find_window_by_title(TITLE);
             if hwnd != 0 && is_window_visible(hwnd) {
@@ -724,9 +728,48 @@ mod tests {
         }
     }
 
+    /// The find icon must actually paint pixels (the window sizing tests
+    /// cannot catch a silently failing GDI draw).
+    #[test]
+    fn find_icon_draws_pixels() {
+        let Some(surf) = create_argb_surface(ICON, ICON) else {
+            panic!("surface");
+        };
+        let rc = Rect {
+            left: 0,
+            top: 0,
+            right: ICON,
+            bottom: ICON,
+        };
+        fill_color(surf.dc, &rc, MASK_COLOR);
+        draw_find_icon(surf.dc, 0, 0);
+        finalize_argb(surf.bits, (ICON * ICON) as usize);
+        let (mut opaque, mut light_px, mut dark_px) = (0, 0, 0);
+        for i in 0..(ICON * ICON) as usize {
+            let v = unsafe { *surf.bits.add(i) };
+            if v >> 24 != 0 {
+                opaque += 1;
+                let (r, g, b) = ((v >> 16) & 0xFF, (v >> 8) & 0xFF, v & 0xFF);
+                if r > 200 && g > 200 && b > 200 {
+                    light_px += 1;
+                }
+                if r < 80 && g < 80 && b < 80 {
+                    dark_px += 1;
+                }
+            }
+        }
+        assert!(
+            opaque > 20,
+            "pointer icon must paint pixels, got {opaque} opaque"
+        );
+        assert!(light_px > 5, "white fill expected, got {light_px}");
+        assert!(dark_px > 5, "dark rim expected, got {dark_px}");
+    }
+
     /// Real desktop smoke test: shows, hides during blackout, position change.
     #[test]
     fn osd_window_show_hide_and_move() {
+        let _g = crate::testsupport::window_test_lock();
         // Match the OSD thread's DPI context: without this, Win32 virtualizes
         // this thread's GetWindowRect into logical pixels (e.g. 40px -> 32px
         // at 125% scaling) while the OSD places itself in physical pixels.

@@ -73,8 +73,14 @@ pub struct Settings {
     /// Shake the pointer side-to-side to spotlight the cursor.
     #[serde(default = "default_cursor_find_enabled")]
     pub cursor_find_enabled: bool,
-    /// While spotlighting, monitors without the cursor show an arrow
-    /// pointing toward the monitor that has it.
+    /// While finding: magnify the cursor itself (scales with shake strength).
+    #[serde(default = "default_cursor_find_magnify")]
+    pub cursor_find_magnify: bool,
+    /// While finding: circular ripple waves around the cursor.
+    #[serde(default = "default_cursor_find_ripple")]
+    pub cursor_find_ripple: bool,
+    /// While finding, monitors without the cursor show an arrow pointing
+    /// toward the monitor that has it.
     #[serde(default = "default_cursor_find_arrows")]
     pub cursor_find_arrows: bool,
 }
@@ -88,6 +94,14 @@ fn default_osd_position() -> OsdPosition {
 }
 
 fn default_cursor_find_enabled() -> bool {
+    true
+}
+
+fn default_cursor_find_magnify() -> bool {
+    true
+}
+
+fn default_cursor_find_ripple() -> bool {
     true
 }
 
@@ -107,6 +121,8 @@ impl Default for Settings {
             osd_enabled: true,
             osd_position: OsdPosition::TopRight,
             cursor_find_enabled: true,
+            cursor_find_magnify: true,
+            cursor_find_ripple: true,
             cursor_find_arrows: true,
         }
     }
@@ -154,6 +170,8 @@ mod tests {
         assert!(s.osd_enabled);
         assert_eq!(s.osd_position, OsdPosition::TopRight);
         assert!(s.cursor_find_enabled);
+        assert!(s.cursor_find_magnify);
+        assert!(s.cursor_find_ripple);
         assert!(s.cursor_find_arrows);
     }
 
@@ -164,6 +182,8 @@ mod tests {
         s.unlock_mouse = UnlockMouse::Click;
         s.osd_position = OsdPosition::MiddleLeft;
         s.cursor_find_enabled = false;
+        s.cursor_find_magnify = false;
+        s.cursor_find_ripple = false;
         s.cursor_find_arrows = false;
         let text = serde_json::to_string(&s).unwrap();
         assert!(text.contains("\"space\""), "{text}");
@@ -174,6 +194,8 @@ mod tests {
         assert_eq!(back.unlock_key, UnlockKey::Space);
         assert_eq!(back.osd_position, OsdPosition::MiddleLeft);
         assert!(!back.cursor_find_enabled);
+        assert!(!back.cursor_find_magnify);
+        assert!(!back.cursor_find_ripple);
         assert!(!back.cursor_find_arrows);
         // Unknown/corrupt files fall back to defaults, never crash.
         let fallback: Settings =
@@ -203,8 +225,10 @@ mod tests {
         assert!(s.start_minimized);
         assert!(s.osd_enabled);
         assert_eq!(s.osd_position, OsdPosition::TopRight);
-        // <=0.2.x files predate cursor-find: both knobs fall back to on.
+        // <=0.2.x files predate cursor-find: every knob falls back to on.
         assert!(s.cursor_find_enabled);
+        assert!(s.cursor_find_magnify);
+        assert!(s.cursor_find_ripple);
         assert!(s.cursor_find_arrows);
     }
 }

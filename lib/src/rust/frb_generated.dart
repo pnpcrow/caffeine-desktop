@@ -558,8 +558,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   Settings dco_decode_settings(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 10)
-      throw Exception('unexpected arr length: expect 10 but see ${arr.length}');
+    if (arr.length != 12)
+      throw Exception('unexpected arr length: expect 12 but see ${arr.length}');
     return Settings(
       awakeEnabled: dco_decode_bool(arr[0]),
       autoBlackoutEnabled: dco_decode_bool(arr[1]),
@@ -570,7 +570,9 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       osdEnabled: dco_decode_bool(arr[6]),
       osdPosition: dco_decode_osd_position(arr[7]),
       cursorFindEnabled: dco_decode_bool(arr[8]),
-      cursorFindArrows: dco_decode_bool(arr[9]),
+      cursorFindMagnify: dco_decode_bool(arr[9]),
+      cursorFindRipple: dco_decode_bool(arr[10]),
+      cursorFindArrows: dco_decode_bool(arr[11]),
     );
   }
 
@@ -685,6 +687,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_osdEnabled = sse_decode_bool(deserializer);
     var var_osdPosition = sse_decode_osd_position(deserializer);
     var var_cursorFindEnabled = sse_decode_bool(deserializer);
+    var var_cursorFindMagnify = sse_decode_bool(deserializer);
+    var var_cursorFindRipple = sse_decode_bool(deserializer);
     var var_cursorFindArrows = sse_decode_bool(deserializer);
     return Settings(
       awakeEnabled: var_awakeEnabled,
@@ -696,6 +700,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       osdEnabled: var_osdEnabled,
       osdPosition: var_osdPosition,
       cursorFindEnabled: var_cursorFindEnabled,
+      cursorFindMagnify: var_cursorFindMagnify,
+      cursorFindRipple: var_cursorFindRipple,
       cursorFindArrows: var_cursorFindArrows,
     );
   }
@@ -829,6 +835,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_bool(self.osdEnabled, serializer);
     sse_encode_osd_position(self.osdPosition, serializer);
     sse_encode_bool(self.cursorFindEnabled, serializer);
+    sse_encode_bool(self.cursorFindMagnify, serializer);
+    sse_encode_bool(self.cursorFindRipple, serializer);
     sse_encode_bool(self.cursorFindArrows, serializer);
   }
 

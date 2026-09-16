@@ -552,10 +552,27 @@ class _SettingsPageState extends State<SettingsPage> with WindowListener {
     );
   }
 
-  /// Shake-to-find-the-cursor: master toggle + the multi-monitor arrow
-  /// hint sub-option (inert while the feature itself is off).
+  /// Shake-to-find-the-cursor: master toggle + the effect sub-options
+  /// (magnify / ripple / multi-monitor arrows), inert while the feature
+  /// itself is off.
   Widget _cursorFindCard(Settings s) {
     final enabled = s.cursorFindEnabled;
+    Widget subRow(String label, bool value, ValueChanged<bool?> onChanged) {
+      return Row(
+        children: [
+          Expanded(
+            child: Text(label,
+                style: TextStyle(color: AppTheme.muted, fontSize: 12.5)),
+          ),
+          Switch(
+            value: value,
+            activeThumbColor: AppTheme.accent,
+            onChanged: onChanged,
+          ),
+        ],
+      );
+    }
+
     return _card(Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -572,8 +589,8 @@ class _SettingsPageState extends State<SettingsPage> with WindowListener {
                           fontWeight: FontWeight.w700)),
                   SizedBox(height: 4),
                   Text(
-                      '마우스를 좌우로 빠르게 흔들면 커서가 강하게 흔든 만큼 커지면서 '
-                      '주변에 동그란 파동이 퍼져 위치를 바로 찾을 수 있습니다.',
+                      '마우스를 좌우로 빠르게 흔들면 커서 위치를 바로 찾을 수 있게 '
+                      '선택한 이펙트를 보여 줍니다.',
                       style: TextStyle(color: AppTheme.muted, fontSize: 12)),
                 ],
               ),
@@ -588,32 +605,33 @@ class _SettingsPageState extends State<SettingsPage> with WindowListener {
             ),
           ],
         ),
-        const SizedBox(height: 10),
+        const SizedBox(height: 6),
         Opacity(
           opacity: enabled ? 1 : 0.45,
           child: IgnorePointer(
             ignoring: !enabled,
-            child: Row(
+            child: Column(
               children: [
-                Expanded(
-                  child: Text('다른 모니터에 방향 화살표 표시',
-                      style: TextStyle(color: AppTheme.muted, fontSize: 12.5)),
-                ),
-                Switch(
-                  value: s.cursorFindArrows,
-                  activeThumbColor: AppTheme.accent,
-                  onChanged: (v) async {
-                    setState(() => _settings = _copy(s, cursorFindArrows: v));
-                    await _push();
-                  },
-                ),
+                subRow('마우스 커서 크게 키우기 (흔든 강도에 비례)', s.cursorFindMagnify,
+                    (v) async {
+                  setState(() => _settings = _copy(s, cursorFindMagnify: v));
+                  await _push();
+                }),
+                subRow('커서 주변에 원형 파형 이펙트', s.cursorFindRipple, (v) async {
+                  setState(() => _settings = _copy(s, cursorFindRipple: v));
+                  await _push();
+                }),
+                subRow('다른 모니터에 방향 화살표 표시', s.cursorFindArrows, (v) async {
+                  setState(() => _settings = _copy(s, cursorFindArrows: v));
+                  await _push();
+                }),
               ],
             ),
           ),
         ),
         const SizedBox(height: 2),
         Text(
-            '커서가 없는 모니터 가운데에 커서가 있는 모니터 방향의 화살표를 보여 줍니다.',
+            '커서가 없는 모니터 가운데에 커서가 있는 모니터 방향의 큰 화살표를 보여 줍니다.',
             style: TextStyle(
                 color: AppTheme.muted.withValues(alpha: enabled ? 1 : 0.45),
                 fontSize: 11)),
@@ -816,6 +834,8 @@ class _SettingsPageState extends State<SettingsPage> with WindowListener {
     bool? osdEnabled,
     OsdPosition? osdPosition,
     bool? cursorFindEnabled,
+    bool? cursorFindMagnify,
+    bool? cursorFindRipple,
     bool? cursorFindArrows,
   }) {
     return Settings(
@@ -828,6 +848,8 @@ class _SettingsPageState extends State<SettingsPage> with WindowListener {
       osdEnabled: osdEnabled ?? s.osdEnabled,
       osdPosition: osdPosition ?? s.osdPosition,
       cursorFindEnabled: cursorFindEnabled ?? s.cursorFindEnabled,
+      cursorFindMagnify: cursorFindMagnify ?? s.cursorFindMagnify,
+      cursorFindRipple: cursorFindRipple ?? s.cursorFindRipple,
       cursorFindArrows: cursorFindArrows ?? s.cursorFindArrows,
     );
   }
