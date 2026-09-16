@@ -70,7 +70,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.13.0';
 
   @override
-  int get rustContentHash => -667058225;
+  int get rustContentHash => -1478416173;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -107,6 +107,10 @@ abstract class RustLibApi extends BaseApi {
   Future<void> crateApiSetAutostart({required bool on_});
 
   Future<void> crateApiSetAwake({required bool on_});
+
+  Future<void> crateApiSetCursorFindEnabled({required bool on_});
+
+  Future<void> crateApiSetOsdEnabled({required bool on_});
 
   Stream<Status> crateApiWatchEvents();
 }
@@ -475,6 +479,65 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       const TaskConstMeta(debugName: "set_awake", argNames: ["on_"]);
 
   @override
+  Future<void> crateApiSetCursorFindEnabled({required bool on_}) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_bool(on_, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 14,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_unit,
+          decodeErrorData: null,
+        ),
+        constMeta: kCrateApiSetCursorFindEnabledConstMeta,
+        argValues: [on_],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiSetCursorFindEnabledConstMeta =>
+      const TaskConstMeta(
+        debugName: "set_cursor_find_enabled",
+        argNames: ["on_"],
+      );
+
+  @override
+  Future<void> crateApiSetOsdEnabled({required bool on_}) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_bool(on_, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 15,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_unit,
+          decodeErrorData: null,
+        ),
+        constMeta: kCrateApiSetOsdEnabledConstMeta,
+        argValues: [on_],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiSetOsdEnabledConstMeta =>
+      const TaskConstMeta(debugName: "set_osd_enabled", argNames: ["on_"]);
+
+  @override
   Stream<Status> crateApiWatchEvents() {
     final sink = RustStreamSink<Status>();
     unawaited(
@@ -486,7 +549,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
             pdeCallFfi(
               generalizedFrbRustBinding,
               serializer,
-              funcId: 14,
+              funcId: 16,
               port: port_,
             );
           },
@@ -580,14 +643,16 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   Status dco_decode_status(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 5)
-      throw Exception('unexpected arr length: expect 5 but see ${arr.length}');
+    if (arr.length != 7)
+      throw Exception('unexpected arr length: expect 7 but see ${arr.length}');
     return Status(
       awake: dco_decode_bool(arr[0]),
       blackout: dco_decode_bool(arr[1]),
       autoBlackout: dco_decode_bool(arr[2]),
       autoBlackoutSecs: dco_decode_u_64(arr[3]),
-      version: dco_decode_String(arr[4]),
+      osdEnabled: dco_decode_bool(arr[4]),
+      cursorFindEnabled: dco_decode_bool(arr[5]),
+      version: dco_decode_String(arr[6]),
     );
   }
 
@@ -713,12 +778,16 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_blackout = sse_decode_bool(deserializer);
     var var_autoBlackout = sse_decode_bool(deserializer);
     var var_autoBlackoutSecs = sse_decode_u_64(deserializer);
+    var var_osdEnabled = sse_decode_bool(deserializer);
+    var var_cursorFindEnabled = sse_decode_bool(deserializer);
     var var_version = sse_decode_String(deserializer);
     return Status(
       awake: var_awake,
       blackout: var_blackout,
       autoBlackout: var_autoBlackout,
       autoBlackoutSecs: var_autoBlackoutSecs,
+      osdEnabled: var_osdEnabled,
+      cursorFindEnabled: var_cursorFindEnabled,
       version: var_version,
     );
   }
@@ -847,6 +916,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_bool(self.blackout, serializer);
     sse_encode_bool(self.autoBlackout, serializer);
     sse_encode_u_64(self.autoBlackoutSecs, serializer);
+    sse_encode_bool(self.osdEnabled, serializer);
+    sse_encode_bool(self.cursorFindEnabled, serializer);
     sse_encode_String(self.version, serializer);
   }
 

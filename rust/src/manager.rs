@@ -18,6 +18,10 @@ pub struct Status {
     pub blackout: bool,
     pub auto_blackout: bool,
     pub auto_blackout_secs: u64,
+    /// Status OSD toggle (also surfaced in the tray menu).
+    pub osd_enabled: bool,
+    /// Shake-to-find-the-cursor toggle (also surfaced in the tray menu).
+    pub cursor_find_enabled: bool,
     pub version: String,
 }
 
@@ -51,6 +55,8 @@ impl Core {
             blackout: self.overlay.is_showing(),
             auto_blackout: s.auto_blackout_enabled,
             auto_blackout_secs: s.auto_blackout_secs,
+            osd_enabled: s.osd_enabled,
+            cursor_find_enabled: s.cursor_find_enabled,
             version: env!("CARGO_PKG_VERSION").to_string(),
         }
     }
@@ -97,6 +103,16 @@ impl Core {
 
     pub(crate) fn set_auto_flag(&self, on: bool) {
         self.settings.lock().unwrap().auto_blackout_enabled = on;
+        let _ = self.settings.lock().unwrap().save();
+    }
+
+    pub(crate) fn set_osd_flag(&self, on: bool) {
+        self.settings.lock().unwrap().osd_enabled = on;
+        let _ = self.settings.lock().unwrap().save();
+    }
+
+    pub(crate) fn set_cursor_find_flag(&self, on: bool) {
+        self.settings.lock().unwrap().cursor_find_enabled = on;
         let _ = self.settings.lock().unwrap().save();
     }
 

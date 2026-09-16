@@ -39,7 +39,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.13.0";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -667058225;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -1478416173;
 
 // Section: executor
 
@@ -479,6 +479,76 @@ fn wire__crate__api__set_awake_impl(
         },
     )
 }
+fn wire__crate__api__set_cursor_find_enabled_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "set_cursor_find_enabled",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_on = <bool>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, ()>((move || {
+                    let output_ok = Ok::<_, ()>({
+                        crate::api::set_cursor_find_enabled(api_on);
+                    })?;
+                    std::result::Result::Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__api__set_osd_enabled_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "set_osd_enabled",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_on = <bool>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, ()>((move || {
+                    let output_ok = Ok::<_, ()>({
+                        crate::api::set_osd_enabled(api_on);
+                    })?;
+                    std::result::Result::Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
 fn wire__crate__api__watch_events_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -630,12 +700,16 @@ impl SseDecode for crate::manager::Status {
         let mut var_blackout = <bool>::sse_decode(deserializer);
         let mut var_autoBlackout = <bool>::sse_decode(deserializer);
         let mut var_autoBlackoutSecs = <u64>::sse_decode(deserializer);
+        let mut var_osdEnabled = <bool>::sse_decode(deserializer);
+        let mut var_cursorFindEnabled = <bool>::sse_decode(deserializer);
         let mut var_version = <String>::sse_decode(deserializer);
         return crate::manager::Status {
             awake: var_awake,
             blackout: var_blackout,
             auto_blackout: var_autoBlackout,
             auto_blackout_secs: var_autoBlackoutSecs,
+            osd_enabled: var_osdEnabled,
+            cursor_find_enabled: var_cursorFindEnabled,
             version: var_version,
         };
     }
@@ -710,7 +784,9 @@ fn pde_ffi_dispatcher_primary_impl(
         11 => wire__crate__api__set_auto_blackout_impl(port, ptr, rust_vec_len, data_len),
         12 => wire__crate__api__set_autostart_impl(port, ptr, rust_vec_len, data_len),
         13 => wire__crate__api__set_awake_impl(port, ptr, rust_vec_len, data_len),
-        14 => wire__crate__api__watch_events_impl(port, ptr, rust_vec_len, data_len),
+        14 => wire__crate__api__set_cursor_find_enabled_impl(port, ptr, rust_vec_len, data_len),
+        15 => wire__crate__api__set_osd_enabled_impl(port, ptr, rust_vec_len, data_len),
+        16 => wire__crate__api__watch_events_impl(port, ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }
@@ -788,6 +864,8 @@ impl flutter_rust_bridge::IntoDart for crate::manager::Status {
             self.blackout.into_into_dart().into_dart(),
             self.auto_blackout.into_into_dart().into_dart(),
             self.auto_blackout_secs.into_into_dart().into_dart(),
+            self.osd_enabled.into_into_dart().into_dart(),
+            self.cursor_find_enabled.into_into_dart().into_dart(),
             self.version.into_into_dart().into_dart(),
         ]
         .into_dart()
@@ -933,6 +1011,8 @@ impl SseEncode for crate::manager::Status {
         <bool>::sse_encode(self.blackout, serializer);
         <bool>::sse_encode(self.auto_blackout, serializer);
         <u64>::sse_encode(self.auto_blackout_secs, serializer);
+        <bool>::sse_encode(self.osd_enabled, serializer);
+        <bool>::sse_encode(self.cursor_find_enabled, serializer);
         <String>::sse_encode(self.version, serializer);
     }
 }

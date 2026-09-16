@@ -43,6 +43,18 @@ class TrayController with TrayListener {
         checked: s.autoBlackout,
         onClick: (_) => core.setAutoBlackout(on_: !s.autoBlackout),
       ),
+      MenuItem.checkbox(
+        key: 'cursorFind',
+        label: '마우스 커서 찾기',
+        checked: s.cursorFindEnabled,
+        onClick: (_) => core.setCursorFindEnabled(on_: !s.cursorFindEnabled),
+      ),
+      MenuItem.checkbox(
+        key: 'osd',
+        label: '화면 상태 표시(OSD)',
+        checked: s.osdEnabled,
+        onClick: (_) => core.setOsdEnabled(on_: !s.osdEnabled),
+      ),
       MenuItem.separator(),
       MenuItem(
         key: 'settings',

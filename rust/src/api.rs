@@ -46,6 +46,20 @@ pub fn set_auto_blackout(on: bool) {
     c.emit();
 }
 
+/// Tray-menu toggle for the status OSD.
+pub fn set_osd_enabled(on: bool) {
+    let c = manager::core();
+    c.set_osd_flag(on);
+    c.emit();
+}
+
+/// Tray-menu toggle for shake-to-find-the-cursor.
+pub fn set_cursor_find_enabled(on: bool) {
+    let c = manager::core();
+    c.set_cursor_find_flag(on);
+    c.emit();
+}
+
 pub fn blackout_now() {
     let c = manager::core();
     c.overlay_show();

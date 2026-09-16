@@ -12,6 +12,12 @@ class Status {
   final bool blackout;
   final bool autoBlackout;
   final BigInt autoBlackoutSecs;
+
+  /// Status OSD toggle (also surfaced in the tray menu).
+  final bool osdEnabled;
+
+  /// Shake-to-find-the-cursor toggle (also surfaced in the tray menu).
+  final bool cursorFindEnabled;
   final String version;
 
   const Status({
@@ -19,6 +25,8 @@ class Status {
     required this.blackout,
     required this.autoBlackout,
     required this.autoBlackoutSecs,
+    required this.osdEnabled,
+    required this.cursorFindEnabled,
     required this.version,
   });
 
@@ -28,6 +36,8 @@ class Status {
       blackout.hashCode ^
       autoBlackout.hashCode ^
       autoBlackoutSecs.hashCode ^
+      osdEnabled.hashCode ^
+      cursorFindEnabled.hashCode ^
       version.hashCode;
 
   @override
@@ -39,5 +49,7 @@ class Status {
           blackout == other.blackout &&
           autoBlackout == other.autoBlackout &&
           autoBlackoutSecs == other.autoBlackoutSecs &&
+          osdEnabled == other.osdEnabled &&
+          cursorFindEnabled == other.cursorFindEnabled &&
           version == other.version;
 }

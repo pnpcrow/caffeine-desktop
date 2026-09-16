@@ -42,7 +42,7 @@ Flutter (lib/) ──FRB──> Rust core (rust/src/)
 
 | 요구사항 | 구현 |
 |---|---|
-| 1. 시스템 트레이 상주 + 메뉴 | `lib/tray.dart` — 절전 방지 체크, 지금 화면 가리기, 자동 가리기 체크, 설정 열기, 종료. 좌클릭 = 설정 열기 |
+| 1. 시스템 트레이 상주 + 메뉴 | `lib/tray.dart` — 절전 방지 체크, 지금 화면 가리기, 자동 가리기 체크, 마우스 커서 찾기 체크, 화면 상태 표시(OSD) 체크, 설정 열기, 종료. 좌클릭 = 설정 열기 |
 | 2a. 화면 꺼짐 방지 | `rust/src/awake.rs` — `SetThreadExecutionState` + 30초 재주장 |
 | 2b. 검은색 차단 + 해제 | `rust/src/overlay.rs` + `unlock.rs` — 모니터별 Win32 전체화면 창, 전역 LL 후크, 흔들기 패턴 감지, 가림 중 화면 중앙에 회색 해제 방법 힌트(설정 기준, 캡처 제외) |
 | 3. 무조작 시 자동 차단 (토글) | `rust/src/idle.rs` + `manager.rs` — 1초 폴링, 기동 후 60초 그레이스 |

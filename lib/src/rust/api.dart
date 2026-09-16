@@ -28,6 +28,14 @@ Future<void> setAwake({required bool on_}) =>
 Future<void> setAutoBlackout({required bool on_}) =>
     RustLib.instance.api.crateApiSetAutoBlackout(on_: on_);
 
+/// Tray-menu toggle for the status OSD.
+Future<void> setOsdEnabled({required bool on_}) =>
+    RustLib.instance.api.crateApiSetOsdEnabled(on_: on_);
+
+/// Tray-menu toggle for shake-to-find-the-cursor.
+Future<void> setCursorFindEnabled({required bool on_}) =>
+    RustLib.instance.api.crateApiSetCursorFindEnabled(on_: on_);
+
 Future<void> blackoutNow() => RustLib.instance.api.crateApiBlackoutNow();
 
 Future<void> clearBlackout() => RustLib.instance.api.crateApiClearBlackout();
