@@ -15,9 +15,10 @@
 //! shapes) and pushed with `UpdateLayeredWindow` at ~125fps:
 //!
 //! * one *spotlight* window that tracks the cursor: a magnified classic
-//!   arrow (scale follows the measured shake amplitude *and* the live
-//!   pointer speed) and/or expanding circular ripples — two independently
-//!   toggleable effects;
+//!   arrow and/or expanding circular ripples — two independently
+//!   toggleable effects. The whole spotlight (arrow, ripples, glow)
+//!   breathes with the live shake speed, between half and double its
+//!   nominal size;
 //! * one *arrow* window centered on every monitor that does NOT hold the
 //!   cursor, showing a big solid arrow pointing toward the monitor that
 //!   does (optional).
@@ -56,28 +57,28 @@ const HOLD_MS: u64 = 1600;
 const FRAME_MS: u64 = 8;
 /// Wake-up cadence while the effect thread is parked waiting for a trigger.
 const POLL_MS: u64 = 16;
-/// Spotlight window edge (px). Must be >= 2 * RING_R1.
-const SPOT_SIZE: i32 = 380;
-/// Ripple radius range (px from the cursor).
+/// Spotlight window edge (px). Must cover RING_R1 * SIZE_MAX plus the
+/// stroke and AA margins on each side of the cursor.
+const SPOT_SIZE: i32 = 680;
+/// Ripple radius range (px from the cursor) at the 1.0x size factor.
 const RING_R0: f32 = 22.0;
 const RING_R1: f32 = 165.0;
 /// Ripple lifetime and spawn interval.
 const RING_LIFE_MS: u64 = 900;
 const RING_SPAWN_MS: u64 = 420;
-/// Soft warm glow radius under the cursor (px).
+/// Soft warm glow radius under the cursor (px) at the 1.0x size factor.
 const GLOW_R: f32 = 68.0;
-/// Cursor magnification bounds (multiple of the base 12x19 arrow).
-const SCALE_MIN: f32 = 1.7;
-const SCALE_MAX: f32 = 3.4;
-/// Amplitude (px) that maps to the magnification ceiling.
-const SCALE_AMP_FULL: f32 = 190.0;
-/// Live pointer speed (px/ms) that maps to the same ceiling: the effect
-/// grows with how *fast* the user shakes, not just how far.
+/// Whole-spotlight size factor bounds: arrow, ripples and glow all breathe
+/// between half and double their nominal size with the shake energy.
+const SIZE_MIN: f32 = 0.5;
+const SIZE_MAX: f32 = 2.0;
+/// Nominal cursor magnification (multiple of the base 12x19 arrow) at the
+/// 1.0x size factor.
+const SCALE_NOMINAL: f32 = 2.6;
+/// Live pointer speed (px/ms) that maps to the full 2.0x size.
 const VEL_FULL: f32 = 2.2;
 /// Per-frame decay of the speed EMA once the pointer settles.
 const VEL_DECAY: f32 = 0.94;
-/// Ripple reach floor at zero shake energy (fraction of RING_R1).
-const REACH_FLOOR: f32 = 0.62;
 /// Arrow-hint geometry: total length as a fraction of monitor height,
 /// clamped — big and readable from across the desk.
 const ARROW_MON_FRACTION: f32 = 0.30;
@@ -239,9 +240,16 @@ pub(crate) fn direction_8way(dx: i32, dy: i32) -> (f32, f32) {
     (ang8.cos(), ang8.sin())
 }
 
-/// Map a measured shake amplitude (px) to the cursor magnification.
-pub(crate) fn amplitude_to_scale(amp: f32) -> f32 {
-    (SCALE_MIN + amp / SCALE_AMP_FULL * (SCALE_MAX - SCALE_MIN)).clamp(SCALE_MIN, SCALE_MAX)
+/// Shake energy (0..1) → whole-spotlight size factor (SIZE_MIN..SIZE_MAX):
+/// 0.5x of the nominal size at rest, 2.0x at a full-speed shake.
+pub(crate) fn size_factor(energy: f32) -> f32 {
+    SIZE_MIN + energy.clamp(0.0, 1.0) * (SIZE_MAX - SIZE_MIN)
+}
+
+/// Shake energy (0..1) → magnified-cursor scale (multiple of the base
+/// 12x19 arrow).
+pub(crate) fn energy_to_scale(energy: f32) -> f32 {
+    SCALE_NOMINAL * size_factor(energy)
 }
 
 /// Live pointer speed estimator: EMA over raw move samples. Pure (time is
@@ -302,14 +310,14 @@ struct RingSpec {
     alpha: f32,
 }
 
-/// Per-frame geometry of the ripple born at `born`. `reach` (fraction of
-/// RING_R1) follows the shake energy, so gentle shakes keep their waves
-/// close to the cursor while violent ones send them far.
-fn ring_spec(born: u64, now: u64, reach: f32) -> RingSpec {
+/// Per-frame geometry of the ripple born at `born`. `size` is the
+/// whole-spotlight size factor, so gentle shakes keep their waves close to
+/// the cursor while violent ones send them far.
+fn ring_spec(born: u64, now: u64, size: f32) -> RingSpec {
     let prog = (now.saturating_sub(born) as f32 / RING_LIFE_MS as f32).min(1.0);
     let eased = 1.0 - (1.0 - prog) * (1.0 - prog); // ease-out
     RingSpec {
-        r: RING_R0 + (RING_R1 * reach - RING_R0) * eased,
+        r: RING_R0 + (RING_R1 * size - RING_R0) * eased,
         width: 3.0 + 1.4 * (1.0 - prog),
         // Gentle decay keeps the stroke dense through most of its life —
         // a fast fade turns the wave into a ghost.
@@ -321,7 +329,8 @@ fn ring_spec(born: u64, now: u64, reach: f32) -> RingSpec {
 /// Center of the window == the cursor hotspot. `magnify` draws the enlarged
 /// cursor arrow; `ripple` enables the glow + the `rings` layer (callers
 /// pass an empty slice when it is off). `glow_r` is the glow radius for
-/// this frame (it breathes with the shake energy).
+/// this frame. Only the disc that actually holds pixels is scanned — the
+/// cost scales with the current effect size, not the window size.
 fn render_spotlight(
     px: &mut [u32],
     w: i32,
@@ -333,14 +342,33 @@ fn render_spotlight(
     magnify: bool,
     ripple: bool,
 ) {
-    let cx = w as f32 / 2.0;
-    let cy = h as f32 / 2.0;
     // Anti-alias ramp half-width for the ring stroke edges (px).
     const RING_AA: f32 = 1.2;
+    let cx = w as f32 / 2.0;
+    let cy = h as f32 / 2.0;
     let poly = arrow_poly(scale);
     // A bold rim is what makes the enlarged cursor read as crisp over any
     // background; a hairline one melts into bright desktops.
     let outline_w = (1.3 * scale).max(1.8);
+
+    // Everything this frame paints lives within this radius of the center:
+    // the glow, every ring stroke (outer edge + AA), and the magnified
+    // arrow's farthest corner (its tip sits ON the center).
+    let mut active = if ripple { glow_r } else { 0.0 };
+    for ring in rings {
+        active = active.max(ring.r + ring.width + RING_AA);
+    }
+    if magnify {
+        let corner = poly
+            .iter()
+            .map(|&(x, y)| (x * x + y * y).sqrt())
+            .fold(0.0f32, f32::max);
+        active = active.max(corner + outline_w + 2.0);
+    }
+    let r = (active + 2.0).min(cx).min(cy);
+    let ri = r.ceil() as i32;
+    let r2 = r * r;
+
     // Bounding box of the magnified arrow: only pixels near it need the
     // (comparatively expensive) polygon test.
     let mut bx0 = f32::MAX;
@@ -360,8 +388,18 @@ fn render_spotlight(
         (cy + by1 + 2.0).ceil().min(h as f32) as i32,
     );
 
-    for y in 0..h {
-        for x in 0..w {
+    // Stale pixels from a larger previous frame must not linger.
+    px.fill(0);
+    let half = w / 2;
+    for dy in -ri..=ri {
+        let y = half + dy;
+        if y < 0 || y >= h {
+            continue;
+        }
+        let xr = (r2 - (dy * dy) as f32).sqrt().ceil() as i32;
+        let x0 = (half - xr).max(0);
+        let x1 = (half + xr).min(w - 1);
+        for x in x0..=x1 {
             let fx = x as f32 + 0.5 - cx;
             let fy = y as f32 + 0.5 - cy;
             let d = (fx * fx + fy * fy).sqrt();
@@ -376,8 +414,8 @@ fn render_spotlight(
                 a_layer += k * k * 0.42;
             }
             for ring in rings {
-                let half = ring.width * 0.5;
-                let cov = ((half - (d - ring.r).abs()) / RING_AA + 0.5).clamp(0.0, 1.0);
+                let half_w = ring.width * 0.5;
+                let cov = ((half_w - (d - ring.r).abs()) / RING_AA + 0.5).clamp(0.0, 1.0);
                 a_layer += cov * ring.alpha;
             }
             a_layer = a_layer.min(1.0) * master;
@@ -522,7 +560,6 @@ impl Default for FindOpts {
 static ACTIVE: AtomicBool = AtomicBool::new(false);
 static CURSOR_X: AtomicI32 = AtomicI32::new(0);
 static CURSOR_Y: AtomicI32 = AtomicI32::new(0);
-static AMPLITUDE: AtomicI32 = AtomicI32::new(0);
 static DEADLINE: AtomicU64 = AtomicU64::new(0);
 static THREAD_STARTED: AtomicBool = AtomicBool::new(false);
 static OPTS: Mutex<FindOpts> = Mutex::new(FindOpts {
@@ -570,13 +607,13 @@ unsafe extern "system" fn wnd_proc(
     def_window_proc(hwnd, msg, wparam, lparam)
 }
 
-/// Fire (or re-fire) the find effect at the cursor. `amplitude` is the
-/// measured shake amplitude in px (drives magnification); `opts` selects
-/// which sub-effects run.
-pub fn trigger(x: i32, y: i32, amplitude: i32, opts: FindOpts) {
+/// Fire (or re-fire) the find effect at the cursor. `opts` selects which
+/// sub-effects run; the size follows the live pointer speed from the first
+/// frame (the input hook feeds the speed tracker with every move, so it is
+/// already warm when the trigger lands).
+pub fn trigger(x: i32, y: i32, opts: FindOpts) {
     CURSOR_X.store(x, Ordering::SeqCst);
     CURSOR_Y.store(y, Ordering::SeqCst);
-    AMPLITUDE.store(amplitude, Ordering::SeqCst);
     if let Ok(mut o) = OPTS.lock() {
         *o = opts;
     }
@@ -657,6 +694,11 @@ fn create_effect_window(title: &str, w: i32, h: i32, instance: isize) -> isize {
     hwnd
 }
 
+/// Live shake energy (0..1): the speed EMA normalized by VEL_FULL.
+fn speed_energy() -> f32 {
+    (SPEED.lock().map(|t| t.speed()).unwrap_or(0.0) / VEL_FULL).clamp(0.0, 1.0)
+}
+
 impl Effect {
     fn create(instance: isize, now: u64) -> Option<Effect> {
         let spot_surf = create_argb_surface(SPOT_SIZE, SPOT_SIZE)?;
@@ -673,7 +715,7 @@ impl Effect {
             cursor_mon: 0,
             rings: Vec::new(),
             next_ring: now,
-            scale: amplitude_to_scale(AMPLITUDE.load(Ordering::SeqCst) as f32),
+            scale: energy_to_scale(speed_energy()),
             cursor_hidden: false,
         };
         fx.reconcile(instance);
@@ -792,16 +834,17 @@ impl Effect {
             // A failed swap retries next frame (rare: cursor handle issues).
         }
 
-        // Shake energy = max(trigger amplitude, live pointer speed). The
-        // speed EMA decays frame by frame so the effect settles with it.
+        // One size knob: the live shake speed drives the whole spotlight
+        // (arrow, ripple reach, glow) between 0.5x and 2.0x its nominal
+        // size. The speed EMA decays frame by frame so the effect settles
+        // with the pointer.
         if let Ok(mut t) = SPEED.lock() {
             t.decay(VEL_DECAY);
         }
-        let intensity = (SPEED.lock().map(|t| t.speed()).unwrap_or(0.0) / VEL_FULL).clamp(0.0, 1.0);
+        let energy = speed_energy();
+        let size = size_factor(energy);
         if opts.magnify {
-            let amp_eff =
-                (AMPLITUDE.load(Ordering::SeqCst) as f32).max(intensity * SCALE_AMP_FULL);
-            let target = amplitude_to_scale(amp_eff);
+            let target = energy_to_scale(energy);
             self.scale += (target - self.scale) * 0.12;
         }
 
@@ -818,12 +861,11 @@ impl Effect {
             self.rings.push(self.next_ring);
             self.next_ring += RING_SPAWN_MS;
         }
-        // Ripple reach and glow radius breathe with the same energy:
+        // Ripple reach and glow radius breathe with the same size factor:
         // gentle shakes stay small, violent ones expand.
-        let reach = REACH_FLOOR + (1.0 - REACH_FLOOR) * intensity;
-        let glow_r = GLOW_R * (0.72 + 0.45 * intensity);
+        let glow_r = GLOW_R * size;
         let rings: Vec<RingSpec> = if opts.ripple {
-            self.rings.iter().map(|&t| ring_spec(t, now, reach)).collect()
+            self.rings.iter().map(|&t| ring_spec(t, now, size)).collect()
         } else {
             Vec::new()
         };
@@ -1106,18 +1148,21 @@ mod tests {
     }
 
     #[test]
-    fn amplitude_maps_to_bounded_scale() {
-        assert!((amplitude_to_scale(0.0) - SCALE_MIN).abs() < 1e-4);
-        assert!((amplitude_to_scale(1000.0) - SCALE_MAX).abs() < 1e-4);
-        let s = amplitude_to_scale(95.0);
-        assert!((SCALE_MIN..SCALE_MAX).contains(&s));
-        assert!(s > SCALE_MIN, "mid amplitudes magnify beyond the floor");
-        // The live-speed path feeds the same mapper scaled by VEL_FULL.
-        let from_speed = amplitude_to_scale(VEL_FULL * SCALE_AMP_FULL);
+    fn shake_energy_maps_to_half_and_double_size() {
+        // The whole spotlight breathes between 0.5x and 2.0x its nominal
+        // size — resting energy is half, a full-speed shake is double.
+        assert!((size_factor(0.0) - SIZE_MIN).abs() < 1e-4);
+        assert!((size_factor(1.0) - SIZE_MAX).abs() < 1e-4);
+        assert!((size_factor(0.5) - 1.25).abs() < 1e-4, "linear midpoint");
         assert!(
-            (from_speed - SCALE_MAX).abs() < 1e-4,
-            "a full-speed shake hits the ceiling too"
+            size_factor(2.0) <= SIZE_MAX + 1e-4,
+            "energy clamps at the ceiling"
         );
+        let rest = energy_to_scale(0.0);
+        let full = energy_to_scale(1.0);
+        assert!((full / rest - 4.0).abs() < 1e-3, "full shake = 4x the resting size");
+        assert!((rest - SCALE_NOMINAL * SIZE_MIN).abs() < 1e-4);
+        assert!(rest > 1.0, "even at rest the enlarged copy stays readable");
     }
 
     #[test]
@@ -1155,15 +1200,15 @@ mod tests {
 
     #[test]
     fn ring_reach_scales_with_energy() {
-        let soft = ring_spec(0, 300, REACH_FLOOR);
-        let hard = ring_spec(0, 300, 1.0);
+        let soft = ring_spec(0, 300, size_factor(0.0));
+        let hard = ring_spec(0, 300, size_factor(1.0));
         assert!(
             hard.r > soft.r + 20.0,
             "energetic shakes send ripples further ({} vs {})",
             hard.r,
             soft.r
         );
-        let birth = ring_spec(0, 0, 1.0);
+        let birth = ring_spec(0, 0, size_factor(1.0));
         assert!(birth.alpha > 0.9 && birth.alpha <= 0.95 + 1e-3, "near-opaque birth");
         assert!(
             birth.width >= 3.0 && birth.width <= 4.4,
@@ -1171,6 +1216,13 @@ mod tests {
             birth.width
         );
         assert!(soft.r >= RING_R0, "ripples never start inside the cursor");
+        // The spotlight window must fit the largest ripple the size factor
+        // can produce (outer stroke edge + AA margin).
+        assert!(
+            RING_R1 * SIZE_MAX + 4.4 + 2.0 <= SPOT_SIZE as f32 / 2.0 + 1e-3,
+            "spot window (edge {SPOT_SIZE}) must cover a {}px ripple",
+            RING_R1 * SIZE_MAX
+        );
     }
 
     // rasterizers ---------------------------------------------------------------
@@ -1312,7 +1364,6 @@ mod tests {
         trigger(
             m.x + m.w / 2,
             m.y + m.h / 2,
-            140,
             FindOpts {
                 arrows: false,
                 ..FindOpts::default()
@@ -1348,7 +1399,6 @@ mod tests {
         trigger(
             m.x + m.w / 4,
             m.y + m.h / 2,
-            200,
             FindOpts {
                 arrows: false,
                 ..FindOpts::default()

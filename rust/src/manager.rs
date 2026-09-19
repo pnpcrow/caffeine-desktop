@@ -180,7 +180,7 @@ pub fn init_core() {
                             crate::log::log_line(&format!(
                                 "find-cursor gesture (amplitude {amplitude}px)"
                             ));
-                            crate::cursor_find::trigger(x, y, amplitude, opts);
+                            crate::cursor_find::trigger(x, y, opts);
                         }
                     } else if crate::cursor_find::is_showing() {
                         crate::cursor_find::cancel();
