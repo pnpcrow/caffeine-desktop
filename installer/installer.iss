@@ -1,12 +1,12 @@
 ; Caffeine Desktop — Inno Setup 6 installer script (Flutter build).
 ; Built by scripts\build.ps1 (ISCC.exe):
-;   ISCC installer.iss /DMyAppVersion=0.3.0
+;   ISCC installer.iss /DMyAppVersion=0.3.1
 ; Requires: flutter build output at ..\build\windows\x64\runner\Release\
 ;           VC++ redist staged at staging\vc_redist.x64.exe (tools\fetch_vcredist.ps1)
 #define MyAppName "Caffeine Desktop"
 #define MyAppExe "caffeine_desktop.exe"
 #ifndef MyAppVersion
-  #define MyAppVersion "0.3.0"
+  #define MyAppVersion "0.3.1"
 #endif
 
 [Setup]

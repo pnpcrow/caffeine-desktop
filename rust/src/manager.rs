@@ -172,14 +172,15 @@ pub fn init_core() {
                         )
                     };
                     if enabled {
-                        match find.feed(x, y) {
-                            Some(amplitude) => {
-                                crate::log::log_line(&format!(
-                                    "find-cursor gesture (amplitude {amplitude}px)"
-                                ));
-                                crate::cursor_find::trigger(x, y, amplitude, opts);
-                            }
-                            None => crate::cursor_find::notify_move(x, y),
+                        // Position + live speed first (even for the strokes
+                        // that complete detection), then detect: the speed
+                        // EMA must be warm when the trigger lands.
+                        crate::cursor_find::notify_move(x, y);
+                        if let Some(amplitude) = find.feed(x, y) {
+                            crate::log::log_line(&format!(
+                                "find-cursor gesture (amplitude {amplitude}px)"
+                            ));
+                            crate::cursor_find::trigger(x, y, amplitude, opts);
                         }
                     } else if crate::cursor_find::is_showing() {
                         crate::cursor_find::cancel();

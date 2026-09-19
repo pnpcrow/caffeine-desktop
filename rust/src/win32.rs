@@ -63,6 +63,63 @@ pub const CLIP_DEFAULT_PRECIS: u32 = 0;
 pub const CLEARTYPE_QUALITY: u32 = 5;
 pub const DEFAULT_PITCH: u32 = 0;
 
+// --- system cursor swap (cursor-find effect) -----------------------------------
+
+/// SPI_SETCURSORS: reload the whole system cursor table from the user's
+/// scheme — the documented way to undo SetSystemCursor.
+pub const SPI_SETCURSORS: u32 = 0x0057;
+
+/// Every standard system cursor id (OCR_*): whichever shape an app picks
+/// (arrow, I-beam, hand, ...) must swap to the blank, not just the arrow.
+const OCR_ALL: [u32; 14] = [
+    32512, // OCR_NORMAL
+    32513, // OCR_IBEAM
+    32514, // OCR_WAIT
+    32515, // OCR_CROSS
+    32516, // OCR_UP
+    32642, // OCR_SIZENWSE
+    32643, // OCR_SIZENESW
+    32644, // OCR_SIZEWE
+    32645, // OCR_SIZENS
+    32646, // OCR_SIZEALL
+    32648, // OCR_NO
+    32649, // OCR_HAND
+    32650, // OCR_APPSTARTING
+    32651, // OCR_HELP
+];
+
+#[repr(C)]
+struct CursorInfo {
+    cb_size: u32,
+    flags: u32,
+    h_cursor: isize,
+    pt_x: i32,
+    pt_y: i32,
+}
+
+/// ICONINFO (cursor flavor): the mask bitmap carries the AND plane (and,
+/// for monochrome cursors, the XOR plane below it).
+#[repr(C)]
+struct IconInfo {
+    is_icon: i32,
+    x_hotspot: i32,
+    y_hotspot: i32,
+    hbm_mask: isize,
+    hbm_color: isize,
+}
+
+/// GDI BITMAP (GetObjectW on an HBITMAP).
+#[repr(C)]
+struct GdiBitmap {
+    kind: i32,
+    width: i32,
+    height: i32,
+    width_bytes: i32,
+    planes: u16,
+    bits_pixel: u16,
+    bits: isize,
+}
+
 /// Per-monitor-V2 DPI awareness (Win10 1607+; target is Win11+).
 /// Threads that create/position windows must opt in, otherwise the OS
 /// virtualizes coordinates and fullscreen overlays land off-target.
@@ -256,6 +313,26 @@ extern "system" {
         blend: *const BlendFunction,
         flags: u32,
     ) -> i32;
+    fn SetSystemCursor(hcur: isize, id: u32) -> i32;
+    fn CopyIcon(hcur: isize) -> isize;
+    fn CreateCursor(
+        inst: isize,
+        xhot: i32,
+        yhot: i32,
+        w: i32,
+        h: i32,
+        and: *const u8,
+        xor: *const u8,
+    ) -> isize;
+    fn DestroyCursor(hcur: isize) -> i32;
+    fn GetCursorInfo(info: *mut CursorInfo) -> i32;
+    fn GetIconInfo(hcur: isize, info: *mut IconInfo) -> i32;
+    fn SystemParametersInfoW(
+        action: u32,
+        param: u32,
+        v: *mut c_void,
+        winini: u32,
+    ) -> i32;
 }
 
 #[link(name = "gdi32")]
@@ -308,6 +385,7 @@ extern "system" {
     ) -> i32;
     fn GdiFlush() -> i32;
     fn Polygon(hdc: isize, pts: *const Point, count: i32) -> i32;
+    fn GetObjectW(h: isize, len: i32, v: *mut c_void) -> i32;
 }
 
 #[link(name = "kernel32")]
@@ -896,6 +974,96 @@ pub fn focus_window_by_title(title: &str) -> bool {
     unsafe {
         ShowWindow(hwnd, SW_RESTORE);
         SetForegroundWindow(hwnd) != 0
+    }
+}
+
+// --- system cursor swap helpers --------------------------------------------------
+
+/// Swap every standard system cursor for a fully transparent 1x1 one. The
+/// OS composites the real cursor above *every* window (nothing can paint
+/// over it), so while the find effect draws its own enlarged cursor the
+/// system one must disappear — otherwise two cursors are on screen.
+/// `restore_system_cursors` must eventually follow. Returns true when at
+/// least one swap landed.
+pub fn hide_system_cursor() -> bool {
+    unsafe {
+        // Monochrome 1x1: AND mask all-1s (leave the pixel) + XOR 0 = invisible.
+        let and = [0xFFu8; 1];
+        let xor = [0x00u8; 1];
+        let blank = CreateCursor(0, 0, 0, 1, 1, and.as_ptr(), xor.as_ptr());
+        if blank == 0 {
+            return false;
+        }
+        let mut any = false;
+        for id in OCR_ALL {
+            // SetSystemCursor consumes the handle, so each id needs a fresh copy.
+            let copy = CopyIcon(blank);
+            if copy != 0 && SetSystemCursor(copy, id) != 0 {
+                any = true;
+            }
+        }
+        DestroyCursor(blank);
+        any
+    }
+}
+
+/// Undo [`hide_system_cursor`] by reloading the user's cursor scheme.
+pub fn restore_system_cursors() -> bool {
+    unsafe { SystemParametersInfoW(SPI_SETCURSORS, 0, std::ptr::null_mut(), 0) != 0 }
+}
+
+/// Mask-bitmap size (w, h) of the cursor currently on screen. Tests use it
+/// to observe the blank swap (w becomes 1) and the restore back to the
+/// user's real cursor dimensions. (0, 0) when the cursor is off or the
+/// query fails.
+pub fn live_cursor_mask_size() -> (i32, i32) {
+    unsafe {
+        let mut ci = CursorInfo {
+            cb_size: std::mem::size_of::<CursorInfo>() as u32,
+            flags: 0,
+            h_cursor: 0,
+            pt_x: 0,
+            pt_y: 0,
+        };
+        if GetCursorInfo(&mut ci) == 0 || ci.h_cursor == 0 {
+            return (0, 0);
+        }
+        let mut ii = IconInfo {
+            is_icon: 0,
+            x_hotspot: 0,
+            y_hotspot: 0,
+            hbm_mask: 0,
+            hbm_color: 0,
+        };
+        if GetIconInfo(ci.h_cursor, &mut ii) == 0 {
+            return (0, 0);
+        }
+        let mut bm = GdiBitmap {
+            kind: 0,
+            width: 0,
+            height: 0,
+            width_bytes: 0,
+            planes: 0,
+            bits_pixel: 0,
+            bits: 0,
+        };
+        let ok = ii.hbm_mask != 0
+            && GetObjectW(
+                ii.hbm_mask,
+                std::mem::size_of::<GdiBitmap>() as i32,
+                &mut bm as *mut GdiBitmap as *mut c_void,
+            ) != 0;
+        if ii.hbm_mask != 0 {
+            DeleteObject(ii.hbm_mask);
+        }
+        if ii.hbm_color != 0 {
+            DeleteObject(ii.hbm_color);
+        }
+        if ok {
+            (bm.width, bm.height)
+        } else {
+            (0, 0)
+        }
     }
 }
 

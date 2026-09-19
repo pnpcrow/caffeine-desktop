@@ -12,14 +12,22 @@
 //! windows, click-through, `WDA_EXCLUDEFROMCAPTURE`, topmost, no
 //! activation — but unlike the OSD the pixels are rasterized per-frame on
 //! the CPU (alpha-faded ripples cannot be expressed with hard-edged GDI
-//! shapes) and pushed with `UpdateLayeredWindow` at ~60fps:
+//! shapes) and pushed with `UpdateLayeredWindow` at ~125fps:
 //!
 //! * one *spotlight* window that tracks the cursor: a magnified classic
-//!   arrow (scale follows the measured shake amplitude) and/or expanding
-//!   circular ripples — two independently toggleable effects;
+//!   arrow (scale follows the measured shake amplitude *and* the live
+//!   pointer speed) and/or expanding circular ripples — two independently
+//!   toggleable effects;
 //! * one *arrow* window centered on every monitor that does NOT hold the
 //!   cursor, showing a big solid arrow pointing toward the monitor that
 //!   does (optional).
+//!
+//! While the magnified arrow plays, the real system cursor is swapped out
+//! for a transparent one (`SetSystemCursor`): the OS composites the real
+//! cursor above every window, so without the swap two cursors would be
+//! visible. The enlarged copy — drawn with its tip exactly on the real
+//! hotspot, at an ~8ms cadence — *becomes* the cursor until the effect
+//! ends, when `SPI_SETCURSORS` restores the user's scheme.
 //!
 //! The whole effect is human-eyes-only and never blocks input.
 
@@ -43,8 +51,11 @@ pub const FIND_MIN_PATH: i64 = 220;
 
 /// How long the effect keeps playing after the last detected shake.
 const HOLD_MS: u64 = 1600;
-/// Render cadence.
-const FRAME_MS: u64 = 16;
+/// Render cadence while playing. The enlarged arrow is the only visible
+/// cursor (the system one is hidden), so it must track tightly.
+const FRAME_MS: u64 = 8;
+/// Wake-up cadence while the effect thread is parked waiting for a trigger.
+const POLL_MS: u64 = 16;
 /// Spotlight window edge (px). Must be >= 2 * RING_R1.
 const SPOT_SIZE: i32 = 380;
 /// Ripple radius range (px from the cursor).
@@ -60,6 +71,13 @@ const SCALE_MIN: f32 = 1.7;
 const SCALE_MAX: f32 = 3.4;
 /// Amplitude (px) that maps to the magnification ceiling.
 const SCALE_AMP_FULL: f32 = 190.0;
+/// Live pointer speed (px/ms) that maps to the same ceiling: the effect
+/// grows with how *fast* the user shakes, not just how far.
+const VEL_FULL: f32 = 2.2;
+/// Per-frame decay of the speed EMA once the pointer settles.
+const VEL_DECAY: f32 = 0.94;
+/// Ripple reach floor at zero shake energy (fraction of RING_R1).
+const REACH_FLOOR: f32 = 0.62;
 /// Arrow-hint geometry: total length as a fraction of monitor height,
 /// clamped — big and readable from across the desk.
 const ARROW_MON_FRACTION: f32 = 0.30;
@@ -222,8 +240,57 @@ pub(crate) fn direction_8way(dx: i32, dy: i32) -> (f32, f32) {
 }
 
 /// Map a measured shake amplitude (px) to the cursor magnification.
-pub(crate) fn amplitude_to_scale(amp: i32) -> f32 {
-    (SCALE_MIN + amp as f32 / SCALE_AMP_FULL * (SCALE_MAX - SCALE_MIN)).clamp(SCALE_MIN, SCALE_MAX)
+pub(crate) fn amplitude_to_scale(amp: f32) -> f32 {
+    (SCALE_MIN + amp / SCALE_AMP_FULL * (SCALE_MAX - SCALE_MIN)).clamp(SCALE_MIN, SCALE_MAX)
+}
+
+/// Live pointer speed estimator: EMA over raw move samples. Pure (time is
+/// injected) so the smoothing behaviour is unit-testable; the process-wide
+/// instance lives behind the `SPEED` mutex because the input hook thread
+/// feeds it while the render thread reads and decays it.
+#[derive(Debug)]
+pub(crate) struct SpeedTracker {
+    last: Option<(i32, i32, u128)>,
+    ema: f32, // px/ms
+}
+
+impl SpeedTracker {
+    pub(crate) const fn new() -> Self {
+        SpeedTracker {
+            last: None,
+            ema: 0.0,
+        }
+    }
+
+    /// Feed a mouse position. Returns the updated EMA speed in px/ms.
+    /// Samples more than `MAX_GAP_MS` apart carry no speed information
+    /// (the pointer teleported or paused) and only re-anchor.
+    pub(crate) fn feed(&mut self, x: i32, y: i32, now: u128) -> f32 {
+        const MAX_GAP_MS: u128 = 40;
+        let inst = match self.last {
+            Some((lx, ly, lt)) if now > lt && now - lt <= MAX_GAP_MS => {
+                let dist = (((x - lx).pow(2) + (y - ly).pow(2)) as f32).sqrt();
+                dist / (now - lt) as f32
+            }
+            _ => 0.0,
+        };
+        self.last = Some((x, y, now));
+        if inst > 0.0 {
+            self.ema = self.ema * 0.65 + inst * 0.35;
+        }
+        self.ema
+    }
+
+    /// Bleed the EMA toward rest (called once per rendered frame so the
+    /// effect calms down when the pointer stops moving).
+    pub(crate) fn decay(&mut self, k: f32) {
+        self.ema *= k;
+    }
+
+    /// Current EMA speed in px/ms.
+    pub(crate) fn speed(&self) -> f32 {
+        self.ema
+    }
 }
 
 // --- pure rasterizers -----------------------------------------------------------
@@ -235,15 +302,30 @@ struct RingSpec {
     alpha: f32,
 }
 
+/// Per-frame geometry of the ripple born at `born`. `reach` (fraction of
+/// RING_R1) follows the shake energy, so gentle shakes keep their waves
+/// close to the cursor while violent ones send them far.
+fn ring_spec(born: u64, now: u64, reach: f32) -> RingSpec {
+    let prog = (now.saturating_sub(born) as f32 / RING_LIFE_MS as f32).min(1.0);
+    let eased = 1.0 - (1.0 - prog) * (1.0 - prog); // ease-out
+    RingSpec {
+        r: RING_R0 + (RING_R1 * reach - RING_R0) * eased,
+        width: 3.0 + 1.4 * (1.0 - prog),
+        alpha: (1.0 - prog).powi(2) * 0.95,
+    }
+}
+
 /// Rasterize one spotlight frame into `px` (w*h premultiplied ARGB u32s).
 /// Center of the window == the cursor hotspot. `magnify` draws the enlarged
 /// cursor arrow; `ripple` enables the glow + the `rings` layer (callers
-/// pass an empty slice when it is off).
+/// pass an empty slice when it is off). `glow_r` is the glow radius for
+/// this frame (it breathes with the shake energy).
 fn render_spotlight(
     px: &mut [u32],
     w: i32,
     h: i32,
     scale: f32,
+    glow_r: f32,
     rings: &[RingSpec],
     master: f32,
     magnify: bool,
@@ -252,7 +334,9 @@ fn render_spotlight(
     let cx = w as f32 / 2.0;
     let cy = h as f32 / 2.0;
     let poly = arrow_poly(scale);
-    let outline_w = (0.9 * scale).max(1.2);
+    // A bold rim is what makes the enlarged cursor read as crisp over any
+    // background; a hairline one melts into bright desktops.
+    let outline_w = (1.3 * scale).max(1.8);
     // Bounding box of the magnified arrow: only pixels near it need the
     // (comparatively expensive) polygon test.
     let mut bx0 = f32::MAX;
@@ -278,15 +362,17 @@ fn render_spotlight(
             let fy = y as f32 + 0.5 - cy;
             let d = (fx * fx + fy * fy).sqrt();
 
-            // Amber base layer: glow + ripples, additive alpha.
+            // Amber base layer: glow + ripples, additive alpha. The ring
+            // falloff is squared so the alpha piles up at the centerline —
+            // a linear ramp smears the wave into a fuzzy band.
             let mut a_layer = 0.0f32;
-            if ripple && d < GLOW_R {
-                let k = 1.0 - d / GLOW_R;
-                a_layer += k * k * 0.30;
+            if ripple && d < glow_r {
+                let k = 1.0 - d / glow_r;
+                a_layer += k * k * 0.42;
             }
             for ring in rings {
                 let edge = (1.0 - (d - ring.r).abs() / ring.width).clamp(0.0, 1.0);
-                a_layer += edge * ring.alpha;
+                a_layer += edge * edge * ring.alpha;
             }
             a_layer = a_layer.min(1.0) * master;
 
@@ -432,6 +518,9 @@ static OPTS: Mutex<FindOpts> = Mutex::new(FindOpts {
     ripple: true,
     arrows: true,
 });
+/// Live pointer speed, fed by the input hook thread on every move and
+/// decayed by the render thread once the pointer settles.
+static SPEED: Mutex<SpeedTracker> = Mutex::new(SpeedTracker::new());
 
 static CLASS_NAME: OnceLock<&'static [u16]> = OnceLock::new();
 static CLASS_ONCE: OnceLock<()> = OnceLock::new();
@@ -486,10 +575,15 @@ pub fn trigger(x: i32, y: i32, amplitude: i32, opts: FindOpts) {
     }
 }
 
-/// Track the cursor while the effect plays (called for every move).
+/// Track the cursor position and live speed (called for every move while
+/// the feature is enabled — both while the effect plays and while it is
+/// idle, so the speed EMA is warm when the next trigger fires).
 pub fn notify_move(x: i32, y: i32) {
     CURSOR_X.store(x, Ordering::SeqCst);
     CURSOR_Y.store(y, Ordering::SeqCst);
+    if let Ok(mut t) = SPEED.lock() {
+        t.feed(x, y, now_ms());
+    }
 }
 
 /// Stop the effect at the next frame (feature disabled or blackout start).
@@ -522,6 +616,10 @@ struct Effect {
     rings: Vec<u64>,
     next_ring: u64,
     scale: f32,
+    /// True while the system cursors have been swapped for the transparent
+    /// blank; Drop (and the render loop, if magnify turns off mid-effect)
+    /// must put the user's scheme back.
+    cursor_hidden: bool,
 }
 
 fn create_effect_window(title: &str, w: i32, h: i32, instance: isize) -> isize {
@@ -563,7 +661,8 @@ impl Effect {
             cursor_mon: 0,
             rings: Vec::new(),
             next_ring: now,
-            scale: amplitude_to_scale(AMPLITUDE.load(Ordering::SeqCst)),
+            scale: amplitude_to_scale(AMPLITUDE.load(Ordering::SeqCst) as f32),
+            cursor_hidden: false,
         };
         fx.reconcile(instance);
         Some(fx)
@@ -658,9 +757,39 @@ impl Effect {
             return;
         }
         let opts = *OPTS.lock().unwrap();
-        // Smooth toward the latest measured amplitude.
+
+        // The enlarged arrow is the only on-screen cursor while it plays:
+        // the OS paints the real one above every window, which reads as two
+        // cursors, so swap it for the transparent blank. Only while magnify
+        // is on — the glow/ripples alone don't mark the hotspot precisely
+        // enough to hide it behind.
+        if opts.magnify != self.cursor_hidden {
+            let ok = if opts.magnify {
+                hide_system_cursor()
+            } else {
+                restore_system_cursors()
+            };
+            if ok {
+                self.cursor_hidden = opts.magnify;
+                crate::log::log_line(if opts.magnify {
+                    "find: system cursor hidden"
+                } else {
+                    "find: system cursor restored"
+                });
+            }
+            // A failed swap retries next frame (rare: cursor handle issues).
+        }
+
+        // Shake energy = max(trigger amplitude, live pointer speed). The
+        // speed EMA decays frame by frame so the effect settles with it.
+        if let Ok(mut t) = SPEED.lock() {
+            t.decay(VEL_DECAY);
+        }
+        let intensity = (SPEED.lock().map(|t| t.speed()).unwrap_or(0.0) / VEL_FULL).clamp(0.0, 1.0);
         if opts.magnify {
-            let target = amplitude_to_scale(AMPLITUDE.load(Ordering::SeqCst));
+            let amp_eff =
+                (AMPLITUDE.load(Ordering::SeqCst) as f32).max(intensity * SCALE_AMP_FULL);
+            let target = amplitude_to_scale(amp_eff);
             self.scale += (target - self.scale) * 0.12;
         }
 
@@ -677,19 +806,12 @@ impl Effect {
             self.rings.push(self.next_ring);
             self.next_ring += RING_SPAWN_MS;
         }
+        // Ripple reach and glow radius breathe with the same energy:
+        // gentle shakes stay small, violent ones expand.
+        let reach = REACH_FLOOR + (1.0 - REACH_FLOOR) * intensity;
+        let glow_r = GLOW_R * (0.72 + 0.45 * intensity);
         let rings: Vec<RingSpec> = if opts.ripple {
-            self.rings
-                .iter()
-                .map(|&t| {
-                    let prog = (now.saturating_sub(t) as f32 / RING_LIFE_MS as f32).min(1.0);
-                    let eased = 1.0 - (1.0 - prog) * (1.0 - prog); // ease-out
-                    RingSpec {
-                        r: RING_R0 + (RING_R1 - RING_R0) * eased,
-                        width: 2.6 + 1.6 * (1.0 - prog),
-                        alpha: (1.0 - prog).powi(2) * 0.85,
-                    }
-                })
-                .collect()
+            self.rings.iter().map(|&t| ring_spec(t, now, reach)).collect()
         } else {
             Vec::new()
         };
@@ -706,6 +828,7 @@ impl Effect {
             SPOT_SIZE,
             SPOT_SIZE,
             self.scale,
+            glow_r,
             &rings,
             master,
             opts.magnify,
@@ -757,13 +880,24 @@ fn point_in_monitor(m: &MonitorRect, x: i32, y: i32) -> bool {
 
 impl Drop for Effect {
     fn drop(&mut self) {
+        // Must run on every exit path (expiry, cancel, blackout start,
+        // even a panic unwind): leaving the system cursor transparent
+        // would leave the user pointerless.
+        if self.cursor_hidden {
+            let ok = restore_system_cursors();
+            crate::log::log_line(&format!(
+                "find: system cursor restored on drop (ok={ok})"
+            ));
+        }
         destroy_window(self.spot);
         self.destroy_arrows();
     }
 }
 
 /// Parked-until-triggered render loop. Created once per process; while the
-/// effect is idle it wakes at ~60Hz only to poll the ACTIVE flag.
+/// effect is idle it wakes at ~60Hz only to poll the ACTIVE flag, and at
+/// ~125Hz while playing so the enlarged cursor tracks the (hidden) real one
+/// tightly.
 fn find_thread() {
     enable_per_monitor_dpi();
     let instance = module_handle();
@@ -773,7 +907,8 @@ fn find_thread() {
     let mut next_frame: u64 = 0;
     let mut next_reconcile: u64 = 0;
     loop {
-        std::thread::sleep(Duration::from_millis(FRAME_MS));
+        let parked = fx.is_none();
+        std::thread::sleep(Duration::from_millis(if parked { POLL_MS } else { FRAME_MS }));
         let now = tick_ms() as u64;
         if fx.is_none() {
             if ACTIVE.load(Ordering::SeqCst) {
@@ -960,11 +1095,70 @@ mod tests {
 
     #[test]
     fn amplitude_maps_to_bounded_scale() {
-        assert!((amplitude_to_scale(0) - SCALE_MIN).abs() < 1e-4);
-        assert!((amplitude_to_scale(1000) - SCALE_MAX).abs() < 1e-4);
-        let s = amplitude_to_scale(95);
+        assert!((amplitude_to_scale(0.0) - SCALE_MIN).abs() < 1e-4);
+        assert!((amplitude_to_scale(1000.0) - SCALE_MAX).abs() < 1e-4);
+        let s = amplitude_to_scale(95.0);
         assert!((SCALE_MIN..SCALE_MAX).contains(&s));
         assert!(s > SCALE_MIN, "mid amplitudes magnify beyond the floor");
+        // The live-speed path feeds the same mapper scaled by VEL_FULL.
+        let from_speed = amplitude_to_scale(VEL_FULL * SCALE_AMP_FULL);
+        assert!(
+            (from_speed - SCALE_MAX).abs() < 1e-4,
+            "a full-speed shake hits the ceiling too"
+        );
+    }
+
+    #[test]
+    fn speed_tracker_ema_rises_with_motion_and_decays() {
+        let mut t = SpeedTracker::new();
+        // No information before the second sample.
+        assert_eq!(t.feed(100, 50, 1_000), 0.0);
+        // 2 px per 2 ms = 1.0 px/ms; the EMA ramps toward it.
+        for i in 1..12 {
+            t.feed(100 + 2 * i, 50, 1_000 + 2 * i as u128);
+        }
+        let gentle = t.speed();
+        assert!(
+            gentle > 0.5 && gentle <= 1.0 + 1e-3,
+            "gentle EMA ≈ 1.0 px/ms, got {gentle}"
+        );
+        // 10 px per 2 ms = 5.0 px/ms: the EMA must climb well past gentle.
+        for i in 1..30 {
+            t.feed(100 + 10 * i, 50, 1_100 + 2 * i as u128);
+        }
+        assert!(
+            t.speed() > gentle + 1.5,
+            "fast shakes read as faster, got {} then {}",
+            gentle,
+            t.speed()
+        );
+        // A stale gap only re-anchors; decay pulls the EMA back to rest.
+        t.feed(500, 500, 5_000);
+        let before = t.speed();
+        t.decay(0.5);
+        t.decay(0.5);
+        assert!(t.speed() < before * 0.5 + 1e-4, "decay shrinks energy");
+        assert_eq!(t.feed(600, 500, 6_000), t.speed(), "gap adds no speed");
+    }
+
+    #[test]
+    fn ring_reach_scales_with_energy() {
+        let soft = ring_spec(0, 300, REACH_FLOOR);
+        let hard = ring_spec(0, 300, 1.0);
+        assert!(
+            hard.r > soft.r + 20.0,
+            "energetic shakes send ripples further ({} vs {})",
+            hard.r,
+            soft.r
+        );
+        let birth = ring_spec(0, 0, 1.0);
+        assert!(birth.alpha > 0.9 && birth.alpha <= 0.95 + 1e-3, "near-opaque birth");
+        assert!(
+            birth.width >= 3.0 && birth.width <= 4.4,
+            "ring keeps a crisp width, got {}",
+            birth.width
+        );
+        assert!(soft.r >= RING_R0, "ripples never start inside the cursor");
     }
 
     // rasterizers ---------------------------------------------------------------
@@ -978,7 +1172,7 @@ mod tests {
             width: 3.0,
             alpha: 0.6,
         }];
-        render_spotlight(&mut px, w, w, 2.5, &rings, 1.0, true, true);
+        render_spotlight(&mut px, w, w, 2.5, GLOW_R, &rings, 1.0, true, true);
         for v in &px {
             let a = v >> 24;
             let r = (v >> 16) & 0xFF;
@@ -1013,7 +1207,7 @@ mod tests {
         // Magnify off: the arrow's spot may still carry the amber glow, but
         // there must be no opaque white arrow body on top of it.
         let mut px = vec![0u32; (w * w) as usize];
-        render_spotlight(&mut px, w, w, 2.5, &rings, 1.0, false, true);
+        render_spotlight(&mut px, w, w, 2.5, GLOW_R, &rings, 1.0, false, true);
         let ax = c + (3.0 * 2.5) as usize;
         let ay = c + (5.0 * 2.5) as usize;
         let v = px[ay * w as usize + ax];
@@ -1023,7 +1217,7 @@ mod tests {
         );
         // Ripple off (no glow, no rings): only the arrow remains.
         let mut px = vec![0u32; (w * w) as usize];
-        render_spotlight(&mut px, w, w, 2.5, &[], 1.0, true, false);
+        render_spotlight(&mut px, w, w, 2.5, GLOW_R, &[], 1.0, true, false);
         assert_eq!(px[c * w as usize + (c + 100)] >> 24, 0, "no ring layer");
         // Probe 60px above center: inside the glow radius but well outside
         // the (magnify-on) arrow polygon, so only the glow could paint it.
@@ -1089,6 +1283,11 @@ mod tests {
         let _g = crate::testsupport::window_test_lock();
         enable_per_monitor_dpi();
         let m = primary_monitor();
+        let base_dims = live_cursor_mask_size();
+        assert!(
+            base_dims.0 > 1,
+            "test needs a real on-screen cursor, got {base_dims:?}"
+        );
         let start = tick_ms() as u64;
         trigger(
             m.x + m.w / 2,
@@ -1111,6 +1310,18 @@ mod tests {
         }
         assert_ne!(hwnd, 0, "spotlight window created");
         assert!(is_showing());
+
+        // With magnify playing, the system cursor must be swapped for the
+        // 1x1 blank (mask width 1) — otherwise two cursors are visible.
+        let mut blank = false;
+        for _ in 0..60 {
+            std::thread::sleep(Duration::from_millis(50));
+            if live_cursor_mask_size().0 == 1 {
+                blank = true;
+                break;
+            }
+        }
+        assert!(blank, "system cursor hidden while magnify plays");
 
         // Re-trigger refreshes position and extends the deadline.
         std::thread::sleep(Duration::from_millis(150));
@@ -1149,5 +1360,42 @@ mod tests {
             }
         }
         assert!(gone, "effect must end after the hold");
+
+        // The user's cursor scheme must be back exactly as it was.
+        let mut restored = false;
+        for _ in 0..40 {
+            std::thread::sleep(Duration::from_millis(50));
+            if live_cursor_mask_size() == base_dims {
+                restored = true;
+                break;
+            }
+        }
+        assert!(
+            restored,
+            "system cursor restored to {base_dims:?} after the effect"
+        );
+    }
+
+    #[test]
+    fn magnified_arrow_has_a_bold_dark_rim() {
+        // Sharpness: the outline band must be a thick, dark rim around the
+        // white fill — a hairline or light rim melts into bright desktops.
+        // At scale 3 the arrow spans ~32x50 local px with its tip at the
+        // window center; row y=20 crosses the wide head body (interior
+        // x = 0..21), with outline_w = 1.3*scale = 3.9.
+        let w = SPOT_SIZE;
+        let c = (w / 2) as usize;
+        let mut px = vec![0u32; (w * w) as usize];
+        render_spotlight(&mut px, w, w, 3.0, GLOW_R, &[], 1.0, true, false);
+        let fill = px[(c + 20) * w as usize + (c + 10)];
+        assert!(
+            (fill >> 24) > 240 && ((fill >> 16) & 0xFF) > 240,
+            "interior stays pure white, got {fill:#010x}"
+        );
+        let rim = px[(c + 20) * w as usize + (c + 1)];
+        assert!(
+            (rim >> 24) > 200 && ((rim >> 16) & 0xFF) < 40,
+            "rim is opaque and dark (black outline), got {rim:#010x}"
+        );
     }
 }
