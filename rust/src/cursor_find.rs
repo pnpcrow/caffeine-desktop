@@ -311,7 +311,9 @@ fn ring_spec(born: u64, now: u64, reach: f32) -> RingSpec {
     RingSpec {
         r: RING_R0 + (RING_R1 * reach - RING_R0) * eased,
         width: 3.0 + 1.4 * (1.0 - prog),
-        alpha: (1.0 - prog).powi(2) * 0.95,
+        // Gentle decay keeps the stroke dense through most of its life —
+        // a fast fade turns the wave into a ghost.
+        alpha: (1.0 - prog).powf(1.5) * 0.95,
     }
 }
 
@@ -333,6 +335,8 @@ fn render_spotlight(
 ) {
     let cx = w as f32 / 2.0;
     let cy = h as f32 / 2.0;
+    // Anti-alias ramp half-width for the ring stroke edges (px).
+    const RING_AA: f32 = 1.2;
     let poly = arrow_poly(scale);
     // A bold rim is what makes the enlarged cursor read as crisp over any
     // background; a hairline one melts into bright desktops.
@@ -362,17 +366,19 @@ fn render_spotlight(
             let fy = y as f32 + 0.5 - cy;
             let d = (fx * fx + fy * fy).sqrt();
 
-            // Amber base layer: glow + ripples, additive alpha. The ring
-            // falloff is squared so the alpha piles up at the centerline —
-            // a linear ramp smears the wave into a fuzzy band.
+            // Amber base layer: glow + ripples, additive alpha. Ring strokes
+            // are flat-top — solid across their width with a ~1.2px AA ramp
+            // at each edge. A center-peaked gradient (edge^n) smears the
+            // wave into a fuzzy band even at high peak alpha.
             let mut a_layer = 0.0f32;
             if ripple && d < glow_r {
                 let k = 1.0 - d / glow_r;
                 a_layer += k * k * 0.42;
             }
             for ring in rings {
-                let edge = (1.0 - (d - ring.r).abs() / ring.width).clamp(0.0, 1.0);
-                a_layer += edge * edge * ring.alpha;
+                let half = ring.width * 0.5;
+                let cov = ((half - (d - ring.r).abs()) / RING_AA + 0.5).clamp(0.0, 1.0);
+                a_layer += cov * ring.alpha;
             }
             a_layer = a_layer.min(1.0) * master;
 
@@ -384,7 +390,12 @@ fn render_spotlight(
                 a_layer,
             );
 
-            // Magnified arrow (white fill, black outline) over the base.
+            // Magnified arrow (white fill, black outline) OVER the base,
+            // premultiplied: out = src + dst * (1 - src_a). Compositing the
+            // other way around (dst + src * (1 - dst_a)) lets the amber
+            // glow wash over the fill — the arrow reads as a cream blur
+            // instead of a crisp white cursor, worst right at the hotspot
+            // where the glow peaks.
             if magnify && x >= bx0 && x < bx1 && y >= by0 && y < by1 {
                 let lpx = x as f32 + 0.5 - cx;
                 let lpy = y as f32 + 0.5 - cy;
@@ -394,12 +405,12 @@ fn render_spotlight(
                     let cov_fill = (0.5 + (sd - outline_w) / 2.0).clamp(0.0, 1.0);
                     let a_full = cov_full * master;
                     let a_fill = cov_fill * master;
-                    let keep = 1.0 - pa;
-                    pr += 255.0 * a_fill * keep;
-                    pg += 255.0 * a_fill * keep;
-                    pb += 255.0 * a_fill * keep;
-                    // The black outline contributes alpha only (rgb stays 0).
-                    pa += keep * a_full;
+                    let keep = 1.0 - a_full;
+                    let white = 255.0 * a_fill;
+                    pr = white + pr * keep;
+                    pg = white + pg * keep;
+                    pb = white + pb * keep;
+                    pa = a_full + pa * keep;
                 }
             }
 
@@ -461,7 +472,8 @@ fn arrow_body(side: i32, dir: (f32, f32), l: f32, pulse: f32) -> [(f32, f32); 7]
 fn render_arrow(px: &mut [u32], side: i32, dir: (f32, f32), l: f32, pulse: f32, master: f32) {
     let poly = arrow_body(side, dir, l, pulse);
     let outline_w = (l * 0.03).max(5.0);
-    let alpha_w = (0.86 + 0.12 * pulse) * master;
+    // Near-opaque: a see-through hint arrow melts into bright desktops.
+    let alpha_w = (0.93 + 0.07 * pulse) * master;
 
     for y in 0..side {
         for x in 0..side {
@@ -1187,12 +1199,20 @@ mod tests {
         let ring_px = px[c * w as usize + (c + 100)];
         assert!(ring_px != 0, "ring visible at r=100");
         assert!(((ring_px >> 16) & 0xFF) > ((ring_px >> 8) & 0xFF), "amber tint");
-        // Inside the magnified arrow the fill is near-white and opaque.
-        let ax = c + (3.0 * 2.5) as usize;
-        let ay = c + (5.0 * 2.5) as usize;
+        // Inside the magnified arrow the fill must be PURE white and fully
+        // opaque — the glow is strongest right under the tip, so a wrong
+        // compositing order tints pixels like this to a cream blur.
+        // (8.5, 20.5) sits deep in the head body, beyond the 3.9px outline.
+        let ax = c + 8;
+        let ay = c + 20;
         let arrow_px = px[ay * w as usize + ax];
-        assert!((arrow_px >> 24) > 200, "arrow opaque: {arrow_px:#010x}");
-        assert!(((arrow_px >> 16) & 0xFF) > 200, "arrow white fill");
+        assert_eq!(arrow_px >> 24, 255, "arrow fully opaque: {arrow_px:#010x}");
+        assert!(
+            ((arrow_px >> 16) & 0xFF) == 255
+                && ((arrow_px >> 8) & 0xFF) == 255
+                && (arrow_px & 0xFF) == 255,
+            "arrow fill stays pure white over the glow, got {arrow_px:#010x}"
+        );
     }
 
     #[test]
@@ -1380,21 +1400,22 @@ mod tests {
     fn magnified_arrow_has_a_bold_dark_rim() {
         // Sharpness: the outline band must be a thick, dark rim around the
         // white fill — a hairline or light rim melts into bright desktops.
-        // At scale 3 the arrow spans ~32x50 local px with its tip at the
-        // window center; row y=20 crosses the wide head body (interior
-        // x = 0..21), with outline_w = 1.3*scale = 3.9.
+        // Rendered WITH the glow on (it peaks under the tip) so the test
+        // also locks the arrow-over-glow compositing order. At scale 3 the
+        // arrow spans ~32x50 local px with its tip at the window center;
+        // row y=20 crosses the wide head body, outline_w = 1.3*3 = 3.9.
         let w = SPOT_SIZE;
         let c = (w / 2) as usize;
         let mut px = vec![0u32; (w * w) as usize];
-        render_spotlight(&mut px, w, w, 3.0, GLOW_R, &[], 1.0, true, false);
+        render_spotlight(&mut px, w, w, 3.0, GLOW_R, &[], 1.0, true, true);
         let fill = px[(c + 20) * w as usize + (c + 10)];
         assert!(
-            (fill >> 24) > 240 && ((fill >> 16) & 0xFF) > 240,
-            "interior stays pure white, got {fill:#010x}"
+            (fill >> 24) == 255 && ((fill >> 16) & 0xFF) == 255,
+            "interior stays pure white over the glow, got {fill:#010x}"
         );
         let rim = px[(c + 20) * w as usize + (c + 1)];
         assert!(
-            (rim >> 24) > 200 && ((rim >> 16) & 0xFF) < 40,
+            (rim >> 24) == 255 && ((rim >> 16) & 0xFF) < 40,
             "rim is opaque and dark (black outline), got {rim:#010x}"
         );
     }
