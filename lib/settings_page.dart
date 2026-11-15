@@ -8,6 +8,7 @@ import 'src/rust/manager.dart' show Status;
 import 'src/rust/settings.dart'
     show OsdPosition, Settings, UnlockKey, UnlockMouse;
 import 'theme.dart';
+import 'coffee_hero.dart';
 import 'tray.dart';
 
 const _timeOptions = <int, String>{
@@ -196,7 +197,7 @@ class _SettingsPageState extends State<SettingsPage> with WindowListener {
             const SizedBox(width: 9),
             const Text('Caffeine Desktop',
                 style: TextStyle(
-                    color: AppTheme.cream,
+                    color: AppTheme.text,
                     fontSize: 13,
                     fontWeight: FontWeight.w700)),
             const Spacer(),
@@ -220,38 +221,13 @@ class _SettingsPageState extends State<SettingsPage> with WindowListener {
         onPressed: onTap,
         child: Text(glyph,
             style: TextStyle(
-                color: danger ? const Color(0xFFF3B8B1) : AppTheme.muted,
+                color: danger ? AppTheme.red : AppTheme.muted,
                 fontSize: 14)),
       ),
     );
   }
 
-  Widget _hero() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-      child: Row(
-        children: [
-          Image.asset('assets/icons/icon.png', width: 104, height: 104),
-          const SizedBox(width: 16),
-          const Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('깨어 있는 화면',
-                    style: TextStyle(
-                        color: AppTheme.cream,
-                        fontSize: 21,
-                        fontWeight: FontWeight.w800)),
-                SizedBox(height: 5),
-                Text('절전 방지 + 캡처에 보이지 않는 화면 가림',
-                    style: TextStyle(color: AppTheme.muted, fontSize: 12.5)),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+  Widget _hero() => const CoffeeHero();
 
   Widget _card(Widget child) {
     return Container(
@@ -283,7 +259,7 @@ class _SettingsPageState extends State<SettingsPage> with WindowListener {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
       decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: 0.25),
+        color: color.withValues(alpha: 0.07),
         border: Border.all(color: color.withValues(alpha: 0.5)),
         borderRadius: BorderRadius.circular(999),
       ),
@@ -298,7 +274,7 @@ class _SettingsPageState extends State<SettingsPage> with WindowListener {
           const SizedBox(width: 7),
           Text(text,
               style: const TextStyle(
-                  color: AppTheme.cream,
+                  color: AppTheme.text,
                   fontSize: 12,
                   fontWeight: FontWeight.w600)),
         ],
@@ -318,7 +294,7 @@ class _SettingsPageState extends State<SettingsPage> with WindowListener {
                 children: [
                   Text('디스플레이 절전 방지',
                       style: TextStyle(
-                          color: AppTheme.cream,
+                          color: AppTheme.text,
                           fontSize: 14,
                           fontWeight: FontWeight.w700)),
                   SizedBox(height: 4),
@@ -344,7 +320,7 @@ class _SettingsPageState extends State<SettingsPage> with WindowListener {
               child: ElevatedButton(
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppTheme.accent,
-                  foregroundColor: const Color(0xFF241305),
+                  foregroundColor: AppTheme.ink,
                   padding: const EdgeInsets.symmetric(vertical: 12),
                   shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(10)),
@@ -362,7 +338,7 @@ class _SettingsPageState extends State<SettingsPage> with WindowListener {
             Expanded(
               child: OutlinedButton(
                 style: OutlinedButton.styleFrom(
-                  foregroundColor: AppTheme.cream,
+                  foregroundColor: AppTheme.text,
                   side: const BorderSide(color: AppTheme.cardBorder),
                   padding: const EdgeInsets.symmetric(vertical: 12),
                   shape: RoundedRectangleBorder(
@@ -394,7 +370,7 @@ class _SettingsPageState extends State<SettingsPage> with WindowListener {
                 children: [
                   Text('자동 화면 가리기',
                       style: TextStyle(
-                          color: AppTheme.cream,
+                          color: AppTheme.text,
                           fontSize: 14,
                           fontWeight: FontWeight.w700)),
                   SizedBox(height: 4),
@@ -448,12 +424,12 @@ class _SettingsPageState extends State<SettingsPage> with WindowListener {
                 children: [
                   Text('화면 상태 표시 (OSD)',
                       style: TextStyle(
-                          color: AppTheme.cream,
+                          color: AppTheme.text,
                           fontSize: 14,
                           fontWeight: FontWeight.w700)),
                   SizedBox(height: 4),
                   Text(
-                      '절전 방지·자동 가림이 켜져 있으면 아주 작은 아이콘으로 알려줍니다. '
+                      '절전 방지·자동 가림·커서 찾기 상태를 작은 아이콘으로 알려줍니다. '
                       '캡처에는 보이지 않고 화면 사용도 막지 않습니다.',
                       style: TextStyle(color: AppTheme.muted, fontSize: 12)),
                 ],
@@ -559,7 +535,7 @@ class _SettingsPageState extends State<SettingsPage> with WindowListener {
           decoration: BoxDecoration(
             color: selected
                 ? AppTheme.accent.withValues(alpha: 0.15)
-                : Colors.black.withValues(alpha: 0.22),
+                : AppTheme.bg2,
             border: Border.all(
                 color: selected
                     ? AppTheme.accent
@@ -609,7 +585,7 @@ class _SettingsPageState extends State<SettingsPage> with WindowListener {
                 children: [
                   Text('마우스 커서 찾기',
                       style: TextStyle(
-                          color: AppTheme.cream,
+                          color: AppTheme.text,
                           fontSize: 14,
                           fontWeight: FontWeight.w700)),
                   SizedBox(height: 4),
@@ -642,7 +618,7 @@ class _SettingsPageState extends State<SettingsPage> with WindowListener {
                   setState(() => _settings = _copy(s, cursorFindMagnify: v));
                   await _push();
                 }),
-                subRow('커서 주변에 원형 파형 이펙트', s.cursorFindRipple, (v) async {
+                subRow('커서 주변에 부드럽게 퍼지는 파형', s.cursorFindRipple, (v) async {
                   setState(() => _settings = _copy(s, cursorFindRipple: v));
                   await _push();
                 }),
@@ -676,7 +652,7 @@ class _SettingsPageState extends State<SettingsPage> with WindowListener {
             children: [
               Text('시스템 시작 시 자동 실행',
                   style: TextStyle(
-                      color: AppTheme.cream,
+                      color: AppTheme.text,
                       fontSize: 14,
                       fontWeight: FontWeight.w700)),
               SizedBox(height: 4),
@@ -719,7 +695,7 @@ class _SettingsPageState extends State<SettingsPage> with WindowListener {
       children: [
         const Text('가림 해제 방법',
             style: TextStyle(
-                color: AppTheme.cream,
+                color: AppTheme.text,
                 fontSize: 14,
                 fontWeight: FontWeight.w700)),
         const SizedBox(height: 4),
@@ -795,7 +771,7 @@ class _SettingsPageState extends State<SettingsPage> with WindowListener {
         value: value,
         underline: const SizedBox.shrink(),
         dropdownColor: AppTheme.bg2,
-        style: const TextStyle(color: AppTheme.cream, fontSize: 12.5),
+        style: const TextStyle(color: AppTheme.text, fontSize: 12.5),
         items: [
           for (final e in items.entries)
             DropdownMenuItem(value: e.key, child: Text(e.value)),
@@ -814,7 +790,7 @@ class _SettingsPageState extends State<SettingsPage> with WindowListener {
             Expanded(
               child: OutlinedButton(
                 style: OutlinedButton.styleFrom(
-                  foregroundColor: AppTheme.cream,
+                  foregroundColor: AppTheme.text,
                   side: const BorderSide(color: AppTheme.cardBorder),
                   padding: const EdgeInsets.symmetric(vertical: 11),
                   shape: RoundedRectangleBorder(
@@ -828,7 +804,7 @@ class _SettingsPageState extends State<SettingsPage> with WindowListener {
             Expanded(
               child: OutlinedButton(
                 style: OutlinedButton.styleFrom(
-                  foregroundColor: const Color(0xFFF3B8B1),
+                  foregroundColor: AppTheme.red,
                   side: BorderSide(
                       color: AppTheme.red.withValues(alpha: 0.4)),
                   padding: const EdgeInsets.symmetric(vertical: 11),

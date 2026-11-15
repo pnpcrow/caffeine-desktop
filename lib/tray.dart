@@ -12,7 +12,7 @@ import 'src/rust/manager.dart' show Status;
 class TrayController with TrayListener {
   Future<void> init() async {
     // tray_manager needs a real file path: materialize the bundled icon.
-    final bytes = await rootBundle.load('assets/icons/icon.ico');
+    final bytes = await rootBundle.load('assets/icons/tray-icon.ico');
     final file = File(
         '${Directory.systemTemp.path}\\caffeine-desktop-tray.ico');
     await file.writeAsBytes(

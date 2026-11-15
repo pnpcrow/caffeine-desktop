@@ -23,6 +23,7 @@ const TITLE: &str = "CaffeineGuard-OSD";
 
 /// Thread message asking the OSD pump thread to re-read state and repaint.
 const WM_OSD_UPDATE: u32 = WM_APP + 1;
+const ZORDER_TIMER: usize = 1;
 
 // --- layout metrics (physical px) ---------------------------------------------
 
@@ -41,10 +42,10 @@ const CROSS_TO_ICON: i32 = 7;
 
 // --- palette (COLORREF 0x00BBGGRR) --------------------------------------------
 
-const COL_ACCENT: u32 = 0x003D_A3_E8; // #E8A33D app amber
+const COL_ACCENT: u32 = 0x005D_93_C0; // #C0935D warm latte
 const COL_LIGHT: u32 = 0x00ED_ED_ED; // #EDEDED
 const COL_DARK: u32 = 0x0020_20_20; // #202020 contrast underlay
-const COL_BROWN: u32 = 0x002B_4A_6B; // #6B4A2B cup steam
+const COL_BROWN: u32 = 0x003E_57_79; // #79573E mocha steam
 /// Sentinel background treated as fully transparent by the mask pass.
 const MASK_COLOR: u32 = 0x00FF_00FF; // magenta
 
@@ -161,9 +162,7 @@ pub(crate) fn layout(pos: OsdPosition, awake: bool, auto: bool, find: bool) -> L
 /// Window origin for a layout size on `mon`.
 pub(crate) fn place(mon: &MonitorRect, pos: OsdPosition, w: i32, h: i32) -> (i32, i32) {
     let x = match pos {
-        OsdPosition::TopLeft | OsdPosition::MiddleLeft | OsdPosition::BottomLeft => {
-            mon.x + MARGIN
-        }
+        OsdPosition::TopLeft | OsdPosition::MiddleLeft | OsdPosition::BottomLeft => mon.x + MARGIN,
         OsdPosition::TopCenter | OsdPosition::Center | OsdPosition::BottomCenter => {
             mon.x + (mon.w - w) / 2
         }
@@ -213,7 +212,7 @@ fn class_name() -> &'static [u16] {
 pub fn update(state: OsdState) {
     {
         let mut cur = state_cell().lock().unwrap();
-        if *cur == state {
+        if *cur == state && (THREAD_STARTED.load(Ordering::SeqCst) || !state.visible()) {
             return;
         }
         *cur = state;
@@ -224,24 +223,32 @@ pub fn update(state: OsdState) {
                 post_thread_msg(tid, WM_OSD_UPDATE);
             }
         }
-    } else if state.visible() {
-        THREAD_STARTED.store(true, Ordering::SeqCst);
+    } else if state.visible() && !THREAD_STARTED.swap(true, Ordering::SeqCst) {
         std::thread::spawn(osd_thread);
     }
 }
 
-unsafe extern "system" fn wnd_proc(
-    hwnd: isize,
-    msg: u32,
-    wparam: usize,
-    lparam: isize,
-) -> isize {
+unsafe extern "system" fn wnd_proc(hwnd: isize, msg: u32, wparam: usize, lparam: isize) -> isize {
     match msg {
-        WM_DISPLAYCHANGE => {
+        WM_DISPLAYCHANGE | WM_DPICHANGED | WM_DWMCOMPOSITIONCHANGED => {
             // Monitor geometry changed: re-anchor from the latest state.
-            apply();
+            post_thread_msg(current_thread_id(), WM_OSD_UPDATE);
             def_window_proc(hwnd, msg, wparam, lparam)
         }
+        WM_TIMER if wparam == ZORDER_TIMER => {
+            let visible = state_cell().lock().unwrap().visible();
+            if visible {
+                if is_window_visible(hwnd) {
+                    reassert_topmost(hwnd);
+                } else {
+                    apply();
+                }
+            }
+            0
+        }
+        WM_NCHITTEST => -1,    // HTTRANSPARENT
+        WM_MOUSEACTIVATE => 3, // MA_NOACTIVATE
+        WM_ERASEBKGND => 1,    // Only UpdateLayeredWindow owns the pixels.
         _ => def_window_proc(hwnd, msg, wparam, lparam),
     }
 }
@@ -318,8 +325,11 @@ fn osd_thread() {
         }
     }
     // Process exit path only: the window dies with the thread.
+    kill_window_timer(hwnd, ZORDER_TIMER);
+    destroy_window(hwnd);
     *hwnd_cell().lock().unwrap() = 0;
     thread_id_cell().lock().unwrap().take();
+    THREAD_STARTED.store(false, Ordering::SeqCst);
 }
 
 /// Re-read the latest state and show/hide/move/repaint the OSD window.
@@ -331,6 +341,7 @@ fn apply() {
     }
     let st = *state_cell().lock().unwrap();
     if !st.visible() {
+        kill_window_timer(hwnd, ZORDER_TIMER);
         hide_window(hwnd);
         return;
     }
@@ -349,25 +360,26 @@ fn apply() {
     fill_color(surf.dc, &rc, MASK_COLOR);
     draw_osd(surf.dc, &lay);
     finalize_argb(surf.bits, (lay.w * lay.h) as usize);
+    apply_capture_exclusion(hwnd);
     if !update_layered_pixels(hwnd, x, y, &surf) {
         crate::log::log_line("osd: UpdateLayeredWindow failed");
     }
     show_noactivate(hwnd);
+    // Other topmost apps can be inserted above us without a state change.
+    // A low-frequency watchdog repairs the order without stealing focus.
+    set_window_timer(hwnd, ZORDER_TIMER, 500);
 }
 
 /// GDI writes leave alpha=0; convert the sentinel background to transparent
 /// and everything else to opaque premultiplied ARGB (shapes are hard-edged,
 /// so there is nothing in between).
 fn finalize_argb(bits: *mut u32, n: usize) {
+    flush_gdi();
     unsafe {
         for i in 0..n {
             let p = bits.add(i);
             let v = *p & 0x00FF_FFFF;
-            *p = if v == MASK_COLOR {
-                0
-            } else {
-                0xFF00_0000 | v
-            };
+            *p = if v == MASK_COLOR { 0 } else { 0xFF00_0000 | v };
         }
     }
 }
@@ -458,8 +470,12 @@ fn draw_awake_icon(dc: isize, x: i32, y: i32) {
         line_to(dc, x + 8, y + 3);
     }
     {
-        let _p = Painter::new(dc, Pen::Null, Brush::Solid(COL_ACCENT));
+        let _p = Painter::new(dc, Pen::Solid(1, COL_DARK), Brush::Solid(COL_ACCENT));
         round_rect_shape(dc, x + 2, y + 4, x + 11, y + 13, 2);
+    }
+    {
+        let _p = Painter::new(dc, Pen::Solid(3, COL_DARK), Brush::Null);
+        ellipse_shape(dc, x + 10, y + 6, x + 15, y + 11);
     }
     {
         let _p = Painter::new(dc, Pen::Solid(1, COL_ACCENT), Brush::Null);
@@ -508,22 +524,20 @@ fn draw_cross(dc: isize, cx: i32, cy: i32) {
 fn draw_find_icon(dc: isize, x: i32, y: i32) {
     // Classic arrow in a ~9x13 box (tip at the origin), so the 1px rim and
     // the +1 light offset still land inside the 16x16 cell.
-    const BASE: [(i32, i32); 7] = [
-        (0, 0),
-        (0, 11),
-        (2, 8),
-        (5, 13),
-        (7, 12),
-        (5, 8),
-        (9, 8),
-    ];
+    const BASE: [(i32, i32); 7] = [(0, 0), (0, 11), (2, 8), (5, 13), (7, 12), (5, 8), (9, 8)];
     let dark: Vec<Point> = BASE
         .iter()
-        .map(|&(px, py)| Point { x: x + px + 2, y: y + py + 1 })
+        .map(|&(px, py)| Point {
+            x: x + px + 2,
+            y: y + py + 1,
+        })
         .collect();
     let light: Vec<Point> = BASE
         .iter()
-        .map(|&(px, py)| Point { x: x + px + 3, y: y + py + 2 })
+        .map(|&(px, py)| Point {
+            x: x + px + 3,
+            y: y + py + 2,
+        })
         .collect();
     {
         let _p = Painter::new(dc, Pen::Solid(2, COL_DARK), Brush::Solid(COL_DARK));
@@ -553,7 +567,14 @@ mod tests {
 
     #[test]
     fn horizontal_rows_lay_icons_side_by_side() {
-        for pos in [TopLeft, TopCenter, TopRight, BottomLeft, BottomCenter, BottomRight] {
+        for pos in [
+            TopLeft,
+            TopCenter,
+            TopRight,
+            BottomLeft,
+            BottomCenter,
+            BottomRight,
+        ] {
             let l = layout(pos, true, true, true);
             assert_eq!(l.w, 3 * ICON + 2 * GAP, "{pos:?} width");
             assert_eq!(l.h, ICON, "{pos:?} height");
@@ -620,10 +641,19 @@ mod tests {
         assert_eq!(place(&m, TopRight, w, h), (1920 - MARGIN - w, MARGIN));
         let (vw, vh) = (ICON, 2 * ICON + GAP); // vertical span
         assert_eq!(place(&m, MiddleLeft, vw, vh), (MARGIN, (1080 - vh) / 2));
-        assert_eq!(place(&m, MiddleRight, vw, vh), (1920 - MARGIN - vw, (1080 - vh) / 2));
-        assert_eq!(place(&m, BottomCenter, w, h), ((1920 - w) / 2, 1080 - MARGIN - h));
+        assert_eq!(
+            place(&m, MiddleRight, vw, vh),
+            (1920 - MARGIN - vw, (1080 - vh) / 2)
+        );
+        assert_eq!(
+            place(&m, BottomCenter, w, h),
+            ((1920 - w) / 2, 1080 - MARGIN - h)
+        );
         assert_eq!(place(&m, BottomLeft, w, h), (MARGIN, 1080 - MARGIN - h));
-        assert_eq!(place(&m, BottomRight, w, h), (1920 - MARGIN - w, 1080 - MARGIN - h));
+        assert_eq!(
+            place(&m, BottomRight, w, h),
+            (1920 - MARGIN - w, 1080 - MARGIN - h)
+        );
         // Multi-monitor offset.
         let m2 = MonitorRect {
             x: 1920,
@@ -646,7 +676,14 @@ mod tests {
             find: false,
         };
         assert!(base.visible());
-        assert!(!OsdState { enabled: false, ..base }.visible(), "OSD off");
+        assert!(
+            !OsdState {
+                enabled: false,
+                ..base
+            }
+            .visible(),
+            "OSD off"
+        );
         assert!(
             !OsdState {
                 awake: false,
@@ -657,9 +694,30 @@ mod tests {
             .visible(),
             "no feature on"
         );
-        assert!(!OsdState { blackout: true, ..base }.visible(), "during blackout");
-        assert!(OsdState { awake: false, ..base }.visible(), "auto only");
-        assert!(OsdState { auto_blackout: false, ..base }.visible(), "awake only");
+        assert!(
+            !OsdState {
+                blackout: true,
+                ..base
+            }
+            .visible(),
+            "during blackout"
+        );
+        assert!(
+            OsdState {
+                awake: false,
+                ..base
+            }
+            .visible(),
+            "auto only"
+        );
+        assert!(
+            OsdState {
+                auto_blackout: false,
+                ..base
+            }
+            .visible(),
+            "awake only"
+        );
         // The cursor-find toggle alone still lights the OSD pointer icon —
         // same "feature armed" semantics as the coffee and eye icons.
         assert!(
@@ -702,7 +760,7 @@ mod tests {
                 find: true,
             });
             std::thread::sleep(Duration::from_millis(100));
-            let hwnd = find_window_by_title(TITLE);
+            let hwnd = *hwnd_cell().lock().unwrap();
             if hwnd != 0 && is_window_visible(hwnd) {
                 if let Some(rc) = window_rect(hwnd) {
                     // The layered window covers exactly the one-icon span.
@@ -721,7 +779,7 @@ mod tests {
         });
         for _ in 0..30 {
             std::thread::sleep(Duration::from_millis(100));
-            let hwnd = find_window_by_title(TITLE);
+            let hwnd = *hwnd_cell().lock().unwrap();
             if hwnd == 0 || !is_window_visible(hwnd) {
                 break;
             }
@@ -744,6 +802,11 @@ mod tests {
         fill_color(surf.dc, &rc, MASK_COLOR);
         draw_find_icon(surf.dc, 0, 0);
         finalize_argb(surf.bits, (ICON * ICON) as usize);
+        assert_eq!(
+            unsafe { *surf.bits },
+            0,
+            "GDI background remains transparent"
+        );
         let (mut opaque, mut light_px, mut dark_px) = (0, 0, 0);
         for i in 0..(ICON * ICON) as usize {
             let v = unsafe { *surf.bits.add(i) };
@@ -787,7 +850,7 @@ mod tests {
         let mut hwnd = 0;
         for _ in 0..40 {
             std::thread::sleep(Duration::from_millis(100));
-            hwnd = find_window_by_title(TITLE);
+            hwnd = *hwnd_cell().lock().unwrap();
             if hwnd != 0 && is_window_visible(hwnd) {
                 break;
             }
@@ -817,8 +880,45 @@ mod tests {
         }
         assert!(anchored, "osd anchored at top-right");
 
+        // A newly shown topmost window must not permanently bury a static
+        // OSD. Do not send any state update while waiting for the watchdog.
+        let competitor = create_window(
+            (WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE) as u32,
+            class_name(),
+            &wide_null("Caffeine-Test-Topmost"),
+            WS_POPUP,
+            m.x,
+            m.y,
+            1,
+            1,
+            module_handle(),
+        );
+        assert_ne!(competitor, 0);
+        show_noactivate(competitor);
+        assert!(
+            is_above(competitor, hwnd),
+            "test competitor starts above OSD"
+        );
+        let mut recovered = false;
+        for _ in 0..20 {
+            std::thread::sleep(Duration::from_millis(100));
+            pump_pending_messages();
+            if is_above(hwnd, competitor) {
+                recovered = true;
+                break;
+            }
+        }
+        destroy_window(competitor);
+        assert!(
+            recovered,
+            "OSD recovers topmost ordering without a settings change"
+        );
+
         // Blackout showing -> hidden (but window survives for reuse).
-        update(OsdState { blackout: true, ..base });
+        update(OsdState {
+            blackout: true,
+            ..base
+        });
         let mut hidden = false;
         for _ in 0..30 {
             std::thread::sleep(Duration::from_millis(100));
@@ -828,7 +928,12 @@ mod tests {
             }
         }
         assert!(hidden, "osd hides during blackout");
-        assert_eq!(find_window_by_title(TITLE), hwnd, "window kept for reuse");
+        std::thread::sleep(Duration::from_millis(650));
+        assert!(
+            !is_window_visible(hwnd),
+            "watchdog must not resurrect a hidden OSD"
+        );
+        assert_eq!(*hwnd_cell().lock().unwrap(), hwnd, "window kept for reuse");
 
         // Back visible and re-anchored after moving to bottom-left.
         update(OsdState {
@@ -849,7 +954,10 @@ mod tests {
         assert!(moved, "osd re-anchored to bottom-left");
 
         // Leave the desktop clean.
-        update(OsdState { enabled: false, ..base });
+        update(OsdState {
+            enabled: false,
+            ..base
+        });
         for _ in 0..30 {
             std::thread::sleep(Duration::from_millis(100));
             if !is_window_visible(hwnd) {

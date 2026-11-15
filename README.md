@@ -49,7 +49,7 @@ Flutter (lib/) ──FRB──> Rust core (rust/src/)
 | 4. 설정 (대기 시간, 해제 방법) | 크롬리스 설정창 — 1~30분, 키보드(아무 키/ESC/스페이스/엔터), 마우스(사용 안 함/움직임/흔들기/클릭) |
 | Windows 시작 시 자동 실행 | 설정 화면 토글(`rust/src/autostart.rs`) + 인스톨러 옵션 — 두 경로 모두 같은 시작 폴더 바로가기(`Caffeine Desktop.lnk`)를 관리하고 `--background` 인자로 실행되어 설정창 없이 트레이로 시작. 일반 실행(아이콘 더블클릭)은 기존대로 창 표시 |
 | 화면 상태 OSD | `rust/src/osd.rs` — 절전 방지(커피잔)·자동 가림(가린 눈) 아주 작은 아이콘, 9방향 위치 선택(가운데 왼쪽/오른쪽은 세로, 가운데는 십자 에임), 설정에서 켜기/끄기 · 캡처 제외+클릭스루, 가림 중에는 숨김 |
-| 마우스 커서 찾기 (0.3.0, 0.3.1 개선) | `rust/src/cursor_find.rs` — 마우스를 좌우로 빠르게 흔들면(550ms 내 방향전환 3회+220px) 선택한 이펙트로 커서 위치를 알려 줌: 커서 확대(별도 토글), 원형 파형(별도 토글), 커서가 없는 모니터 중앙의 모니터 높이 비례 큰 화살표(8방향, 별도 토글). 0.3.1: 확대 재생 중 실제 커서를 투명 커서로 교체해 "커서 두 개" 현상 제거(종료 시 사용자 스킴 복원), 흔드는 속도에 따라 커서·파형·글로우 전체가 기준 크기의 0.5–2.0배로 실시간 호흡(정지 시 잦아듦), 확대 화살표가 글로우에 물들던 합성 순서 버그 수정(순백 채움·검은 외곽선) + 평탄 스트로크 파형·모니터 화살표 불투명도 상향으로 선명도 개선. 기능이 켜져 있으면 OSD에 포인터 아이콘 상시 표시(커피잔·눈 아이콘과 같은 시맨틱). 가림 중에는 흔들기가 해제 제스처로 동작하므로 상호배제 |
+| 마우스 커서 찾기 | `rust/src/cursor_find.rs` — 빠른 좌우 흔들기로 커서 확대·원형 파형·다른 모니터 방향 화살표. 고주사율 마우스의 작은 이동도 누적 판정하며, 시간 기반 크기 보간과 파형별 반경 유지, 부드러운 진입·종료를 적용. |
 | 캡처 방지 | `WDA_EXCLUDEFROMCAPTURE` — `Win+Shift+S`로 검증 (눈엔 검게, 결과엔 바탕 그대로) |
 | Computer Use 호환 | `WS_EX_TRANSPARENT \| WS_EX_LAYERED` + 입력 무시 — 에이전트 입력 그대로 통과 |
 
@@ -88,12 +88,23 @@ Flutter (lib/) ──FRB──> Rust core (rust/src/)
 
 ## 검증 상태
 
-- 자동: `cargo test` 9종 (흔들기 판정·키 매트릭스·이동 임계·설정 round-trip·FFI 레이아웃·
-  실 오버레이 생성/파괴+지오메트리), `flutter analyze` clean,
-  `tools/test_autofire.ps1` (무입력 자동발화→오버레이 HWND/affinity 로그/픽셀 캡처제외),
-  인스톨러 무음 설치/제거.
+- 자동: `cargo test` 42종 (실제 창의 최상위 순서 복구·메시지 응답·커서 복원, 알파 합성·잔상 제거, 고폴링 흔들기, 프레임률 독립 보간 포함), `flutter test` 3종 (최소 창·130% 글꼴 포함), `flutter analyze`, Windows 릴리스 빌드.
 - 수동 확인 체크리스트 (2분): 트레이 우클릭 5종, 토글 2회(응답 유지), [지금 화면 가리기] →
   전 모니터 검게 → ESC/흔들기 해제, 가림 중 `Win+Shift+S` 캡처 제외 확인.
+
+## 0.4.0 렌더링과 디자인
+
+- OSD는 표시 중 500ms 간격으로 일반 데스크톱의 최상위 순서를 재확인한다. 디스플레이·DPI·DWM 합성 변경 시 다시 그리며, 가림 중/OSD 비활성 상태에서는 타이머를 중지한다. 포커스를 가져오지 않는다.
+- GDI 작업이 끝난 뒤 DIB 알파값을 계산한다. 커서 효과 창도 Windows 메시지를 처리하며, 프레임마다 투명 버퍼를 지우고 premultiplied ARGB로 합성한다. 위치와 픽셀은 UpdateLayeredWindow에서 함께 갱신한다.
+- 애니메이션은 단조 고해상도 시간으로 계산하고 DwmFlush로 합성 시점에 맞춘다(최대 약 125fps). 커서 위치는 래스터화 직후 최신 좌표를 읽고, 방향 화살표는 30fps로 제한한다. 커서 확대는 원래 크기에서 부드럽게 커졌다 돌아오며, 파형은 생성 시 반경을 유지하고 잔광은 따로 페이드한다.
+- 커서 대체 프레임이 실제로 전달된 다음에만 시스템 커서를 숨긴다. 표시 실패·종료·취소 시 저장해 둔 실제 커서 모양을 복원한다(실패 시 저장된 사용자 스킴으로 복구).
+- 첨부 캐릭터의 크림·모카·청회색을 사용한 밝은 테마와 커피 일러스트. 앱/트레이/설치 아이콘은 `gen-bot-face` 스킬 지침으로 생성한 얼굴을 사용한다.
+
+일반 데스크톱의 topmost 창을 대상으로 한다. 보안 데스크톱(UAC/잠금), Windows가 별도 관리하는 시스템 레이어, 독점 전체화면 위 표시까지 보장하지 않는다. 특정 Windows 업데이트가 원인이라는 점은 확정하지 않았으며, 해당 환경에서의 장시간 고속 이동·다중 모니터 실사용 확인은 별도로 필요하다.
+
+구현 근거: [DIB와 GDI 동기화](https://learn.microsoft.com/en-us/windows/win32/api/wingdi/nf-wingdi-createdibsection), [최상위 순서](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setwindowpos), [DWM 프레임 동기화](https://learn.microsoft.com/en-us/windows/win32/api/dwmapi/nf-dwmapi-dwmflush).
+
+이미지 원본과 생성 프롬프트: `assets/artwork.json`, `assets/illustrations/coffee-companion.png`, `assets/icons/icon-source.png`. 기본 내장 이미지 도구로 제작했으며 외부 API 키는 사용하지 않았다. 아이콘 크기/포맷 재생성은 `python tools/make_icons.py` (개발 시 Pillow 필요). `assets/icons`와 Windows runner 리소스를 함께 갱신한다.
 
 ## 문제 해결
 

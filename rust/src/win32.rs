@@ -32,6 +32,12 @@ pub const BLACK_BRUSH: i32 = 4;
 
 pub const WM_PAINT: u32 = 0x000F;
 pub const WM_DISPLAYCHANGE: u32 = 0x007E;
+pub const WM_DPICHANGED: u32 = 0x02E0;
+pub const WM_DWMCOMPOSITIONCHANGED: u32 = 0x031E;
+pub const WM_TIMER: u32 = 0x0113;
+pub const WM_ERASEBKGND: u32 = 0x0014;
+pub const WM_NCHITTEST: u32 = 0x0084;
+pub const WM_MOUSEACTIVATE: u32 = 0x0021;
 pub const WM_CLOSE: u32 = 0x0010;
 pub const WM_QUIT: u32 = 0x0012;
 pub const SW_RESTORE: i32 = 9;
@@ -211,8 +217,7 @@ pub struct BlendFunction {
 }
 
 pub type WndProc = Option<unsafe extern "system" fn(isize, u32, usize, isize) -> isize>;
-pub type EnumMonProc =
-    Option<unsafe extern "system" fn(isize, isize, *mut Rect, isize) -> i32>;
+pub type EnumMonProc = Option<unsafe extern "system" fn(isize, isize, *mut Rect, isize) -> i32>;
 
 #[repr(C)]
 pub struct WndClass {
@@ -271,15 +276,20 @@ extern "system" {
     fn DefWindowProcW(hwnd: isize, msg: u32, wparam: usize, lparam: isize) -> isize;
     fn ShowWindow(hwnd: isize, cmd: i32) -> i32;
     fn IsWindowVisible(hwnd: isize) -> i32;
-    fn SetWindowPos(
+    #[cfg(test)]
+    fn GetWindow(hwnd: isize, cmd: u32) -> isize;
+    #[cfg(test)]
+    fn SendMessageTimeoutW(
         hwnd: isize,
-        after: isize,
-        x: i32,
-        y: i32,
-        cx: i32,
-        cy: i32,
+        msg: u32,
+        wp: usize,
+        lp: isize,
         flags: u32,
-    ) -> i32;
+        timeout: u32,
+        result: *mut usize,
+    ) -> isize;
+    fn SetWindowPos(hwnd: isize, after: isize, x: i32, y: i32, cx: i32, cy: i32, flags: u32)
+        -> i32;
     fn DestroyWindow(hwnd: isize) -> i32;
     fn BeginPaint(hwnd: isize, paint: *mut Paint) -> isize;
     fn EndPaint(hwnd: isize, paint: *const Paint) -> i32;
@@ -287,15 +297,13 @@ extern "system" {
     fn GetStockObject(i: i32) -> isize;
     fn PostThreadMessageW(thread: u32, msg: u32, wparam: usize, lparam: isize) -> i32;
     fn GetMessageW(msg: *mut WinMsg, hwnd: isize, min: u32, max: u32) -> i32;
+    fn PeekMessageW(msg: *mut WinMsg, hwnd: isize, min: u32, max: u32, remove: u32) -> i32;
+    fn SetTimer(hwnd: isize, id: usize, ms: u32, callback: usize) -> usize;
+    fn KillTimer(hwnd: isize, id: usize) -> i32;
     fn TranslateMessage(msg: *const WinMsg) -> i32;
     fn DispatchMessageW(msg: *const WinMsg) -> isize;
     fn PostQuitMessage(code: i32);
-    fn EnumDisplayMonitors(
-        hdc: isize,
-        clip: *const Rect,
-        proc_: EnumMonProc,
-        data: isize,
-    ) -> i32;
+    fn EnumDisplayMonitors(hdc: isize, clip: *const Rect, proc_: EnumMonProc, data: isize) -> i32;
     fn GetMonitorInfoW(hmon: isize, info: *mut MonitorInfo) -> i32;
     fn GetWindowRect(hwnd: isize, rect: *mut Rect) -> i32;
     fn GetClientRect(hwnd: isize, rect: *mut Rect) -> i32;
@@ -326,13 +334,9 @@ extern "system" {
     ) -> isize;
     fn DestroyCursor(hcur: isize) -> i32;
     fn GetCursorInfo(info: *mut CursorInfo) -> i32;
+    fn LoadCursorW(instance: isize, name: *const u16) -> isize;
     fn GetIconInfo(hcur: isize, info: *mut IconInfo) -> i32;
-    fn SystemParametersInfoW(
-        action: u32,
-        param: u32,
-        v: *mut c_void,
-        winini: u32,
-    ) -> i32;
+    fn SystemParametersInfoW(action: u32, param: u32, v: *mut c_void, winini: u32) -> i32;
 }
 
 #[link(name = "gdi32")]
@@ -374,15 +378,7 @@ extern "system" {
     fn MoveToEx(hdc: isize, x: i32, y: i32, previous: *mut Point) -> i32;
     fn LineTo(hdc: isize, x: i32, y: i32) -> i32;
     fn Ellipse(hdc: isize, l: i32, t: i32, r: i32, b: i32) -> i32;
-    fn RoundRect(
-        hdc: isize,
-        l: i32,
-        t: i32,
-        r: i32,
-        b: i32,
-        edge_w: i32,
-        edge_h: i32,
-    ) -> i32;
+    fn RoundRect(hdc: isize, l: i32, t: i32, r: i32, b: i32, edge_w: i32, edge_h: i32) -> i32;
     fn GdiFlush() -> i32;
     fn Polygon(hdc: isize, pts: *const Point, count: i32) -> i32;
     fn GetObjectW(h: isize, len: i32, v: *mut c_void) -> i32;
@@ -394,6 +390,52 @@ extern "system" {
     fn GetModuleHandleW(name: *const u16) -> isize;
     fn GetCurrentThreadId() -> u32;
     fn GetLastError() -> u32;
+}
+
+#[link(name = "dwmapi")]
+extern "system" {
+    fn DwmFlush() -> i32;
+}
+
+/// Pace the dedicated animation thread with desktop composition.
+pub fn wait_for_compositor() -> bool {
+    unsafe { DwmFlush() >= 0 }
+}
+
+/// A rendering thread that owns HWNDs must also dispatch their messages.
+pub fn pump_pending_messages() -> bool {
+    unsafe {
+        let mut msg: WinMsg = std::mem::zeroed();
+        // Bound the drain so a message flood cannot starve presentation.
+        for _ in 0..128 {
+            if PeekMessageW(&mut msg, 0, 0, 0, 1) == 0 {
+                break;
+            }
+            if msg.message == WM_QUIT {
+                return false;
+            }
+            TranslateMessage(&msg);
+            DispatchMessageW(&msg);
+        }
+    }
+    true
+}
+
+pub fn set_window_timer(hwnd: isize, id: usize, ms: u32) -> bool {
+    unsafe { SetTimer(hwnd, id, ms, 0) != 0 }
+}
+
+pub fn kill_window_timer(hwnd: isize, id: usize) {
+    unsafe {
+        KillTimer(hwnd, id);
+    }
+}
+
+/// Finish batched GDI writes BEFORE touching a DIB's pixels on the CPU.
+pub fn flush_gdi() {
+    unsafe {
+        GdiFlush();
+    }
 }
 
 pub fn tick_ms() -> u32 {
@@ -536,6 +578,27 @@ pub fn show_noactivate(hwnd: isize) {
 /// Whether the OS considers `hwnd` shown (IsWindowVisible).
 pub fn is_window_visible(hwnd: isize) -> bool {
     unsafe { IsWindowVisible(hwnd) != 0 }
+}
+
+#[cfg(test)]
+pub fn is_above(hwnd: isize, other: isize) -> bool {
+    let mut previous = other;
+    for _ in 0..10000 {
+        previous = unsafe { GetWindow(previous, 3) }; // GW_HWNDPREV
+        if previous == 0 {
+            return false;
+        }
+        if previous == hwnd {
+            return true;
+        }
+    }
+    false
+}
+
+#[cfg(test)]
+pub fn window_responds(hwnd: isize) -> bool {
+    let mut result = 0;
+    unsafe { SendMessageTimeoutW(hwnd, 0, 0, 0, 2, 500, &mut result) != 0 }
 }
 
 pub fn destroy_window(hwnd: isize) {
@@ -826,19 +889,13 @@ pub fn create_argb_surface(w: i32, h: i32) -> Option<ArgbSurface> {
             colors: [0; 4],
         };
         let mut bits: *mut c_void = std::ptr::null_mut();
-        let bitmap = CreateDIBSection(
-            dc,
-            &bmi,
-            DIB_RGB_COLORS,
-            &mut bits,
-            0,
-            0,
-        );
+        let bitmap = CreateDIBSection(dc, &bmi, DIB_RGB_COLORS, &mut bits, 0, 0);
         if bitmap == 0 || bits.is_null() {
             DeleteDC(dc);
             return None;
         }
         let old_bitmap = SelectObject(dc, bitmap);
+        std::ptr::write_bytes(bits, 0, (w as usize) * (h as usize) * 4);
         Some(ArgbSurface {
             dc,
             bitmap,
@@ -869,15 +926,7 @@ pub fn update_layered_pixels(hwnd: isize, x: i32, y: i32, surface: &ArgbSurface)
             alpha_format: AC_SRC_ALPHA,
         };
         UpdateLayeredWindow(
-            hwnd,
-            0,
-            &dst_pt,
-            &size,
-            surface.dc,
-            &src_pt,
-            0,
-            &blend,
-            ULW_ALPHA,
+            hwnd, 0, &dst_pt, &size, surface.dc, &src_pt, 0, &blend, ULW_ALPHA,
         ) != 0
     }
 }
@@ -926,8 +975,7 @@ pub fn enum_monitors() -> Vec<MonitorRect> {
 /// one as a fallback.
 pub fn primary_monitor() -> MonitorRect {
     let mons = enum_monitors();
-    mons
-        .iter()
+    mons.iter()
         .find(|m| m.primary)
         .copied()
         .unwrap_or_else(|| MonitorRect {
@@ -940,7 +988,8 @@ pub fn primary_monitor() -> MonitorRect {
 }
 
 /// Current window rect (client+frame) or None.
-pub fn window_rect(hwnd: isize) -> Option<Rect> {    let mut rc: Rect = Rect {
+pub fn window_rect(hwnd: isize) -> Option<Rect> {
+    let mut rc: Rect = Rect {
         left: 0,
         top: 0,
         right: 0,
@@ -979,6 +1028,8 @@ pub fn focus_window_by_title(title: &str) -> bool {
 
 // --- system cursor swap helpers --------------------------------------------------
 
+static CURSOR_BACKUP: std::sync::Mutex<Vec<(u32, isize)>> = std::sync::Mutex::new(Vec::new());
+
 /// Swap every standard system cursor for a fully transparent 1x1 one. The
 /// OS composites the real cursor above *every* window (nothing can paint
 /// over it), so while the find effect draws its own enlarged cursor the
@@ -986,12 +1037,33 @@ pub fn focus_window_by_title(title: &str) -> bool {
 /// `restore_system_cursors` must eventually follow. Returns true when at
 /// least one swap landed.
 pub fn hide_system_cursor() -> bool {
+    let mut saved = CURSOR_BACKUP.lock().unwrap_or_else(|e| e.into_inner());
+    if !saved.is_empty() {
+        return true;
+    }
     unsafe {
+        // Copy the current table before changing ANY entry. Reloading the
+        // persisted scheme alone can change a live/custom cursor's shape.
+        for id in OCR_ALL {
+            let original = LoadCursorW(0, id as usize as *const u16);
+            let copy = if original == 0 { 0 } else { CopyIcon(original) };
+            if copy == 0 {
+                for (_, cursor) in saved.drain(..) {
+                    DestroyCursor(cursor);
+                }
+                return false;
+            }
+            saved.push((id, copy));
+        }
         // Monochrome 1x1: AND mask all-1s (leave the pixel) + XOR 0 = invisible.
-        let and = [0xFFu8; 1];
-        let xor = [0x00u8; 1];
+        // Win32 scanlines are WORD aligned even for a one-pixel cursor.
+        let and = [0xFFu8; 2];
+        let xor = [0x00u8; 2];
         let blank = CreateCursor(0, 0, 0, 1, 1, and.as_ptr(), xor.as_ptr());
         if blank == 0 {
+            for (_, cursor) in saved.drain(..) {
+                DestroyCursor(cursor);
+            }
             return false;
         }
         let mut any = false;
@@ -1003,13 +1075,40 @@ pub fn hide_system_cursor() -> bool {
             }
         }
         DestroyCursor(blank);
+        if !any {
+            for (_, cursor) in saved.drain(..) {
+                DestroyCursor(cursor);
+            }
+        }
         any
     }
 }
 
-/// Undo [`hide_system_cursor`] by reloading the user's cursor scheme.
+/// Restore the exact live cursor table. Persisted scheme reload is only a
+/// fallback if the original handles cannot be restored.
 pub fn restore_system_cursors() -> bool {
-    unsafe { SystemParametersInfoW(SPI_SETCURSORS, 0, std::ptr::null_mut(), 0) != 0 }
+    let mut saved = CURSOR_BACKUP.lock().unwrap_or_else(|e| e.into_inner());
+    unsafe {
+        saved.retain(|&(id, original)| {
+            let copy = CopyIcon(original);
+            if copy != 0 && SetSystemCursor(copy, id) != 0 {
+                DestroyCursor(original);
+                false
+            } else {
+                true
+            }
+        });
+        if saved.is_empty() {
+            return true;
+        }
+        if SystemParametersInfoW(SPI_SETCURSORS, 0, std::ptr::null_mut(), 0) != 0 {
+            for (_, cursor) in saved.drain(..) {
+                DestroyCursor(cursor);
+            }
+            return true;
+        }
+        false
+    }
 }
 
 /// Mask-bitmap size (w, h) of the cursor currently on screen. Tests use it
@@ -1028,42 +1127,53 @@ pub fn live_cursor_mask_size() -> (i32, i32) {
         if GetCursorInfo(&mut ci) == 0 || ci.h_cursor == 0 {
             return (0, 0);
         }
-        let mut ii = IconInfo {
-            is_icon: 0,
-            x_hotspot: 0,
-            y_hotspot: 0,
-            hbm_mask: 0,
-            hbm_color: 0,
-        };
-        if GetIconInfo(ci.h_cursor, &mut ii) == 0 {
-            return (0, 0);
-        }
-        let mut bm = GdiBitmap {
-            kind: 0,
-            width: 0,
-            height: 0,
-            width_bytes: 0,
-            planes: 0,
-            bits_pixel: 0,
-            bits: 0,
-        };
-        let ok = ii.hbm_mask != 0
-            && GetObjectW(
-                ii.hbm_mask,
-                std::mem::size_of::<GdiBitmap>() as i32,
-                &mut bm as *mut GdiBitmap as *mut c_void,
-            ) != 0;
-        if ii.hbm_mask != 0 {
-            DeleteObject(ii.hbm_mask);
-        }
-        if ii.hbm_color != 0 {
-            DeleteObject(ii.hbm_color);
-        }
-        if ok {
-            (bm.width, bm.height)
-        } else {
-            (0, 0)
-        }
+        cursor_mask_size(ci.h_cursor)
+    }
+}
+
+/// Compare the same scheme entry in tests; the active app may switch
+/// between I-beam/hand/arrow while the test runs on an interactive desktop.
+#[cfg(test)]
+pub fn system_arrow_mask_size() -> (i32, i32) {
+    unsafe { cursor_mask_size(LoadCursorW(0, 32512usize as *const u16)) }
+}
+
+unsafe fn cursor_mask_size(cursor: isize) -> (i32, i32) {
+    let mut ii = IconInfo {
+        is_icon: 0,
+        x_hotspot: 0,
+        y_hotspot: 0,
+        hbm_mask: 0,
+        hbm_color: 0,
+    };
+    if cursor == 0 || GetIconInfo(cursor, &mut ii) == 0 {
+        return (0, 0);
+    }
+    let mut bm = GdiBitmap {
+        kind: 0,
+        width: 0,
+        height: 0,
+        width_bytes: 0,
+        planes: 0,
+        bits_pixel: 0,
+        bits: 0,
+    };
+    let ok = ii.hbm_mask != 0
+        && GetObjectW(
+            ii.hbm_mask,
+            std::mem::size_of::<GdiBitmap>() as i32,
+            &mut bm as *mut GdiBitmap as *mut c_void,
+        ) != 0;
+    if ii.hbm_mask != 0 {
+        DeleteObject(ii.hbm_mask);
+    }
+    if ii.hbm_color != 0 {
+        DeleteObject(ii.hbm_color);
+    }
+    if ok {
+        (bm.width, bm.height)
+    } else {
+        (0, 0)
     }
 }
 

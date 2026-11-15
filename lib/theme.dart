@@ -1,23 +1,23 @@
 import 'package:flutter/material.dart';
 
-/// Espresso + caramel theme, fully specified.
+/// Warm paper + mocha theme, fully specified.
 ///
 /// Every text style is declared explicitly (color, size, weight, and
 /// `decoration: none`) so no text ever inherits an ambient or fallback
 /// style. Button/popup/dialog surfaces that Flutter styles from the theme
 /// are also pinned to the palette.
 class AppTheme {
-  static const bg0 = Color(0xFF140D08);
-  static const bg1 = Color(0xFF1E140D);
-  static const bg2 = Color(0xFF2A1D12);
-  static const cardBorder = Color(0x38E8A33D);
-  static const accent = Color(0xFFE8A33D);
-  static const accentDeep = Color(0xFFC96F2B);
-  static const cream = Color(0xFFF5EBDD);
-  static const muted = Color(0xFFB9A68E);
-  static const green = Color(0xFF8FCE7E);
-  static const red = Color(0xFFE0685C);
-  static const ink = Color(0xFF241305);
+  static const bg0 = Color(0xFFF8F4EA);
+  static const bg1 = Color(0xFFFFFCF6);
+  static const bg2 = Color(0xFFF0E8DC);
+  static const cardBorder = Color(0xFFDED4C5);
+  static const accent = Color(0xFF79573E);
+  static const accentDeep = Color(0xFF657381);
+  static const text = Color(0xFF302C29);
+  static const muted = Color(0xFF71685F);
+  static const green = Color(0xFF476951);
+  static const red = Color(0xFFA1463B);
+  static const ink = Color(0xFFFFFCF6);
 
   static const _plain = TextDecoration.none;
 
@@ -37,42 +37,44 @@ class AppTheme {
     );
   }
 
-  static ThemeData dark() {
-    final scheme = const ColorScheme.dark(
+  static ThemeData light() {
+    final scheme = const ColorScheme.light(
       primary: accent,
       onPrimary: ink,
       secondary: accentDeep,
-      onSecondary: cream,
+      onSecondary: ink,
       surface: bg1,
-      onSurface: cream,
+      onSurface: text,
       surfaceContainerLowest: bg0,
       surfaceContainerLow: bg1,
       surfaceContainerHigh: bg2,
       error: red,
-      onError: cream,
+      onError: ink,
     );
 
-    final text = TextTheme(
-      displayLarge: _t(28, cream, FontWeight.w800),
-      displayMedium: _t(24, cream, FontWeight.w800),
-      displaySmall: _t(21, cream, FontWeight.w800),
-      headlineLarge: _t(20, cream, FontWeight.w700),
-      headlineMedium: _t(18, cream, FontWeight.w700),
-      headlineSmall: _t(21, cream, FontWeight.w800),
-      titleLarge: _t(16, cream, FontWeight.w700),
-      titleMedium: _t(14, cream, FontWeight.w700),
-      titleSmall: _t(13, cream, FontWeight.w600),
-      bodyLarge: _t(14, cream, FontWeight.w400, height: 1.5),
-      bodyMedium: _t(13, cream, FontWeight.w400, height: 1.5),
+    final typography = TextTheme(
+      displayLarge: _t(28, text, FontWeight.w800),
+      displayMedium: _t(24, text, FontWeight.w800),
+      displaySmall: _t(21, text, FontWeight.w800),
+      headlineLarge: _t(20, text, FontWeight.w700),
+      headlineMedium: _t(18, text, FontWeight.w700),
+      headlineSmall: _t(21, text, FontWeight.w800),
+      titleLarge: _t(16, text, FontWeight.w700),
+      titleMedium: _t(14, text, FontWeight.w700),
+      titleSmall: _t(13, text, FontWeight.w600),
+      bodyLarge: _t(14, text, FontWeight.w400, height: 1.5),
+      bodyMedium: _t(13, text, FontWeight.w400, height: 1.5),
       bodySmall: _t(12, muted, FontWeight.w400, height: 1.55),
-      labelLarge: _t(13, cream, FontWeight.w700),
-      labelMedium: _t(12.5, cream, FontWeight.w600),
+      labelLarge: _t(13, text, FontWeight.w700),
+      labelMedium: _t(12.5, text, FontWeight.w600),
       labelSmall: _t(11, muted, FontWeight.w400, height: 1.5),
     );
 
-    final radius10 =
-        RoundedRectangleBorder(borderRadius: BorderRadius.circular(10));
+    final radius10 = RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(10),
+    );
     const buttonText = TextStyle(
+      fontFamily: 'Malgun Gothic',
       fontSize: 13,
       fontWeight: FontWeight.w700,
       decoration: TextDecoration.none,
@@ -80,6 +82,7 @@ class AppTheme {
 
     return ThemeData(
       useMaterial3: true,
+      fontFamily: 'Malgun Gothic',
       colorScheme: scheme,
       scaffoldBackgroundColor: Colors.transparent,
       canvasColor: bg1,
@@ -87,8 +90,8 @@ class AppTheme {
       dividerColor: cardBorder,
       splashFactory: NoSplash.splashFactory,
       highlightColor: Colors.transparent,
-      textTheme: text,
-      primaryTextTheme: text,
+      textTheme: typography,
+      primaryTextTheme: typography,
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(
           backgroundColor: accent,
@@ -102,10 +105,10 @@ class AppTheme {
       ),
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
-          foregroundColor: cream,
+          foregroundColor: text,
           disabledForegroundColor: muted,
           side: const BorderSide(color: cardBorder),
-          textStyle: buttonText.copyWith(color: cream),
+          textStyle: buttonText.copyWith(color: text),
           shape: radius10,
           padding: const EdgeInsets.symmetric(vertical: 12),
         ),
@@ -114,29 +117,30 @@ class AppTheme {
         style: TextButton.styleFrom(
           foregroundColor: muted,
           textStyle: buttonText.copyWith(color: muted),
-          shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(8)),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
         ),
       ),
       switchTheme: SwitchThemeData(
-        thumbColor: WidgetStateProperty.resolveWith((states) =>
-            states.contains(WidgetState.selected) ? accent : muted),
-        trackColor: WidgetStateProperty.resolveWith((states) =>
-            states.contains(WidgetState.selected)
-                ? accent.withValues(alpha: 0.35)
-                : cream.withValues(alpha: 0.12)),
-        trackOutlineColor:
-            WidgetStateProperty.all(cardBorder.withValues(alpha: 0.6)),
+        overlayColor: WidgetStatePropertyAll(accent.withValues(alpha: 0.10)),
+        thumbColor: WidgetStateProperty.resolveWith(
+          (states) => states.contains(WidgetState.selected) ? accent : muted,
+        ),
+        trackColor: WidgetStateProperty.resolveWith(
+          (states) => states.contains(WidgetState.selected)
+              ? accent.withValues(alpha: 0.35)
+              : text.withValues(alpha: 0.12),
+        ),
+        trackOutlineColor: WidgetStateProperty.all(
+          cardBorder.withValues(alpha: 0.6),
+        ),
       ),
       dropdownMenuTheme: const DropdownMenuThemeData(
-        menuStyle: MenuStyle(
-          backgroundColor: WidgetStatePropertyAll(bg2),
-        ),
+        menuStyle: MenuStyle(backgroundColor: WidgetStatePropertyAll(bg2)),
       ),
       popupMenuTheme: const PopupMenuThemeData(
         color: bg2,
         textStyle: TextStyle(
-          color: cream,
+          color: text,
           fontSize: 12.5,
           decoration: TextDecoration.none,
         ),
@@ -144,7 +148,7 @@ class AppTheme {
       dialogTheme: const DialogThemeData(
         backgroundColor: bg2,
         titleTextStyle: TextStyle(
-          color: cream,
+          color: text,
           fontSize: 14,
           fontWeight: FontWeight.w700,
           decoration: TextDecoration.none,
@@ -161,7 +165,7 @@ class AppTheme {
           borderRadius: BorderRadius.all(Radius.circular(8)),
         ),
         textStyle: TextStyle(
-          color: cream,
+          color: text,
           fontSize: 12,
           decoration: TextDecoration.none,
         ),
@@ -169,15 +173,15 @@ class AppTheme {
       snackBarTheme: const SnackBarThemeData(
         backgroundColor: bg2,
         contentTextStyle: TextStyle(
-          color: cream,
+          color: text,
           fontSize: 12,
           decoration: TextDecoration.none,
         ),
       ),
       listTileTheme: const ListTileThemeData(
-        textColor: cream,
+        textColor: text,
         titleTextStyle: TextStyle(
-          color: cream,
+          color: text,
           fontSize: 13,
           decoration: TextDecoration.none,
         ),
@@ -187,7 +191,7 @@ class AppTheme {
           decoration: TextDecoration.none,
         ),
       ),
-      iconTheme: const IconThemeData(color: cream, size: 20),
+      iconTheme: const IconThemeData(color: text, size: 20),
     );
   }
 
@@ -200,7 +204,7 @@ class AppTheme {
       gradient: const LinearGradient(
         begin: Alignment.topLeft,
         end: Alignment.bottomRight,
-        colors: [Color(0xFF241610), bg1, Color(0xFF120B07)],
+        colors: [bg0, bg1, Color(0xFFF1E9DC)],
       ),
       border: Border.all(color: cardBorder),
       borderRadius: BorderRadius.circular(18),
@@ -209,9 +213,9 @@ class AppTheme {
 
   static BoxDecoration cardDeco() {
     return BoxDecoration(
-      color: const Color.fromRGBO(245, 235, 221, 0.045),
+      color: bg1,
       border: Border.all(color: cardBorder),
-      borderRadius: BorderRadius.circular(14),
+      borderRadius: BorderRadius.circular(18),
     );
   }
 }

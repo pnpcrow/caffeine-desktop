@@ -27,8 +27,9 @@ Future<void> main(List<String> args) async {
   // Startup-folder entries launch with --background: start in the tray
   // instead of popping the settings window over the login session. The
   // runner forwards the command line to this entrypoint (argv[0] skipped).
-  final backgroundLaunch =
-      args.any((a) => a == '--background' || a == '--minimized');
+  final backgroundLaunch = args.any(
+    (a) => a == '--background' || a == '--minimized',
+  );
 
   // Single instance: the loser focuses the winner's window and exits.
   if (!await core.ensureSingleInstance()) {
@@ -42,8 +43,8 @@ Future<void> main(List<String> args) async {
   final settings = await core.getSettings();
 
   const options = WindowOptions(
-    size: Size(480, 700),
-    minimumSize: Size(440, 620),
+    size: Size(540, 800),
+    minimumSize: Size(480, 640),
     center: true,
     backgroundColor: Colors.transparent,
     skipTaskbar: false,
@@ -76,7 +77,7 @@ class CaffeineApp extends StatelessWidget {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       title: 'Caffeine Desktop',
-      theme: AppTheme.dark(),
+      theme: AppTheme.light(),
       // DragToResizeArea: the frameless window has no native resize borders,
       // so 8px drag strips (edges + corners) are overlaid on the shell. The
       // top strip also keeps the double-click-to-maximize gesture.
