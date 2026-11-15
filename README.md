@@ -98,13 +98,19 @@ Flutter (lib/) ──FRB──> Rust core (rust/src/)
 - GDI 작업이 끝난 뒤 DIB 알파값을 계산한다. 커서 효과 창도 Windows 메시지를 처리하며, 프레임마다 투명 버퍼를 지우고 premultiplied ARGB로 합성한다. 위치와 픽셀은 UpdateLayeredWindow에서 함께 갱신한다.
 - 애니메이션은 단조 고해상도 시간으로 계산하고 DwmFlush로 합성 시점에 맞춘다(최대 약 125fps). 커서 위치는 래스터화 직후 최신 좌표를 읽고, 방향 화살표는 30fps로 제한한다. 커서 확대는 원래 크기에서 부드럽게 커졌다 돌아오며, 파형은 생성 시 반경을 유지하고 잔광은 따로 페이드한다.
 - 커서 대체 프레임이 실제로 전달된 다음에만 시스템 커서를 숨긴다. 표시 실패·종료·취소 시 저장해 둔 실제 커서 모양을 복원한다(실패 시 저장된 사용자 스킴으로 복구).
-- 첨부 캐릭터의 크림·모카·청회색을 사용한 밝은 테마와 커피 일러스트. 앱/트레이/설치 아이콘은 `gen-bot-face` 스킬 지침으로 생성한 얼굴을 사용한다.
+- 첨부 캐릭터의 크림·모카·청회색을 사용한 밝은 테마와 커피 일러스트. 앱/설치 아이콘은 `gen-bot-face` 스킬 지침으로 생성한 얼굴을 사용한다.
 
 일반 데스크톱의 topmost 창을 대상으로 한다. 보안 데스크톱(UAC/잠금), Windows가 별도 관리하는 시스템 레이어, 독점 전체화면 위 표시까지 보장하지 않는다. 특정 Windows 업데이트가 원인이라는 점은 확정하지 않았으며, 해당 환경에서의 장시간 고속 이동·다중 모니터 실사용 확인은 별도로 필요하다.
 
 구현 근거: [DIB와 GDI 동기화](https://learn.microsoft.com/en-us/windows/win32/api/wingdi/nf-wingdi-createdibsection), [최상위 순서](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setwindowpos), [DWM 프레임 동기화](https://learn.microsoft.com/en-us/windows/win32/api/dwmapi/nf-dwmapi-dwmflush).
 
-이미지 원본과 생성 프롬프트: `assets/artwork.json`, `assets/illustrations/coffee-companion.png`, `assets/icons/icon-source.png`. 기본 내장 이미지 도구로 제작했으며 외부 API 키는 사용하지 않았다. 아이콘 크기/포맷 재생성은 `python tools/make_icons.py` (개발 시 Pillow 필요). `assets/icons`와 Windows runner 리소스를 함께 갱신한다.
+이미지 원본과 생성 프롬프트: `assets/artwork.json`, `assets/illustrations/coffee-companion.png`, `assets/icons/icon-source.png`, `assets/icons/tray-icon-source.png`. 기본 내장 이미지 도구로 제작했으며 외부 API 키는 사용하지 않았다. 아이콘 크기/포맷 재생성은 `python tools/make_icons.py` (개발 시 Pillow 필요). 앱과 트레이의 각 원본을 사용해 `assets/icons`와 Windows runner 리소스를 갱신한다.
+
+## 0.4.1 커피잔 트레이 아이콘
+
+- 시스템 트레이에 크림색 머그컵·짙은 커피·김이 보이는 승인된 시안을 적용했다. 앱/설치 아이콘은 기존 캐릭터 얼굴을 유지한다.
+- 투명 배경과 손잡이의 빈 공간을 보존한 16·20·24·32·40·48·64px ICO를 제공한다. Windows 트레이 크기에 맞는 프레임을 로드한다.
+- 트레이만 재생성하려면 `python tools/make_icons.py --only tray`를 실행한다. 원본은 `assets/icons/tray-icon-source.png`이다.
 
 ## 문제 해결
 

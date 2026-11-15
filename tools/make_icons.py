@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Package the approved gen-bot-face PNG for Flutter, tray and Windows.
+"""Package the approved app and coffee tray PNGs for Flutter and Windows.
 
 Format/size conversion only; artwork comes from imagegen.
 Run: python tools/make_icons.py [path/to/square-transparent-source.png]
+     python tools/make_icons.py --only tray [--tray-source path/to/source.png]
 Requires Pillow on the development machine, never at app runtime.
 """
 from pathlib import Path
@@ -15,28 +16,41 @@ ICON_DIR = ROOT / "assets" / "icons"
 SIZES = (16, 20, 24, 32, 40, 48, 64, 128, 256)
 
 
+def load_source(path: Path) -> Image.Image:
+    with Image.open(path) as source:
+        if source.width != source.height:
+            raise ValueError(f"The approved source must be square: {path}")
+        rgba = source.convert("RGBA")
+    if rgba.getchannel("A").getextrema() != (0, 255):
+        raise ValueError(f"The source must contain real transparency and opaque artwork: {path}")
+    return rgba
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("source", nargs="?", type=Path,
                         default=ICON_DIR / "icon-source.png")
+    parser.add_argument("--tray-source", type=Path,
+                        default=ICON_DIR / "tray-icon-source.png")
+    parser.add_argument("--only", choices=("all", "app", "tray"), default="all")
     args = parser.parse_args()
-    with Image.open(args.source) as source:
-        if source.width != source.height:
-            raise ValueError("The approved source must be square")
-        rgba = source.convert("RGBA")
-    if rgba.getchannel("A").getextrema() != (0, 255):
-        raise ValueError("The source must contain real transparency and opaque artwork")
+    app = load_source(args.source) if args.only in ("all", "app") else None
+    tray = load_source(args.tray_source) if args.only in ("all", "tray") else None
     ICON_DIR.mkdir(parents=True, exist_ok=True)
-    master = rgba.resize((512, 512), Image.Resampling.LANCZOS)
-    master.save(ICON_DIR / "icon.png", optimize=True)
-    for name, size in (("32x32.png", 32), ("128x128.png", 128),
-                       ("128x128@2x.png", 256), ("tray-icon.png", 32)):
-        rgba.resize((size, size), Image.Resampling.LANCZOS).save(ICON_DIR / name)
-    master.save(ICON_DIR / "icon.ico", sizes=[(s, s) for s in SIZES])
-    master.save(ICON_DIR / "tray-icon.ico", sizes=[(s, s) for s in SIZES[:6]])
-    runner = ROOT / "windows" / "runner" / "resources" / "app_icon.ico"
-    shutil.copyfile(ICON_DIR / "icon.ico", runner)
-    print(f"Packaged transparent icons in {ICON_DIR} and {runner}")
+    if app is not None:
+        master = app.resize((512, 512), Image.Resampling.LANCZOS)
+        master.save(ICON_DIR / "icon.png", optimize=True)
+        for name, size in (("32x32.png", 32), ("128x128.png", 128),
+                           ("128x128@2x.png", 256)):
+            app.resize((size, size), Image.Resampling.LANCZOS).save(ICON_DIR / name)
+        master.save(ICON_DIR / "icon.ico", sizes=[(s, s) for s in SIZES])
+        runner = ROOT / "windows" / "runner" / "resources" / "app_icon.ico"
+        shutil.copyfile(ICON_DIR / "icon.ico", runner)
+        print(f"Packaged app icons in {ICON_DIR} and {runner}")
+    if tray is not None:
+        tray.resize((32, 32), Image.Resampling.LANCZOS).save(ICON_DIR / "tray-icon.png")
+        tray.save(ICON_DIR / "tray-icon.ico", sizes=[(s, s) for s in SIZES[:7]])
+        print(f"Packaged coffee tray icons (16-64px) in {ICON_DIR}")
 
 
 if __name__ == "__main__":
