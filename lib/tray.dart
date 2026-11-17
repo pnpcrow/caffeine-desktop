@@ -18,7 +18,7 @@ class TrayController with TrayListener {
     await file.writeAsBytes(
         bytes.buffer.asUint8List(bytes.offsetInBytes, bytes.lengthInBytes));
     await trayManager.setIcon(file.path);
-    await trayManager.setToolTip('Caffeine Desktop — 디스플레이 절전 방지');
+    await trayManager.setToolTip('Caffeine Desktop');
     trayManager.addListener(this);
   }
 

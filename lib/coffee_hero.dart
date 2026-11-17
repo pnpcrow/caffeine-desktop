@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'theme.dart';
 
-/// A quiet coffee break, with the reference character on warm paper.
+/// A cup of caffeine to keep the screen awake, with the reference character.
 class CoffeeHero extends StatelessWidget {
   const CoffeeHero({super.key});
 
@@ -26,7 +26,7 @@ class CoffeeHero extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
-                    'A LITTLE COFFEE BREAK',
+                    'KEEP YOUR SCREEN AWAKE',
                     style: TextStyle(
                       color: AppTheme.accent,
                       fontSize: 9,
@@ -36,7 +36,7 @@ class CoffeeHero extends StatelessWidget {
                   ),
                   SizedBox(height: 12),
                   Text(
-                    '화면은 깨어 있게.\n잠깐의 여유는 편하게.',
+                    '화면은 깨어 있게.\n카페인 한 잔.',
                     style: TextStyle(
                       color: AppTheme.text,
                       fontSize: 22,
@@ -47,7 +47,7 @@ class CoffeeHero extends StatelessWidget {
                   ),
                   SizedBox(height: 10),
                   Text(
-                    '절전 방지부터 화면 가림까지,\n작업 곁에 조용히 함께할게요.',
+                    '절전 방지를 켜고,\n필요한 동안 화면을 켜 두세요.',
                     style: TextStyle(
                       color: AppTheme.muted,
                       fontSize: 12,
@@ -69,7 +69,7 @@ class CoffeeHero extends StatelessWidget {
               height: 210,
               fit: BoxFit.cover,
               alignment: Alignment.topCenter,
-              semanticLabel: '머그컵의 커피를 마시며 쉬는 캐릭터',
+              semanticLabel: '머그컵의 커피를 마시는 캐릭터',
               filterQuality: FilterQuality.high,
             ),
           ),

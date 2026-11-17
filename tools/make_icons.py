@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Package the approved app and coffee tray PNGs for Flutter and Windows.
 
-Format/size conversion only; artwork comes from imagegen.
+Transparent-canvas fitting and format/size conversion; artwork comes from imagegen.
 Run: python tools/make_icons.py [path/to/square-transparent-source.png]
      python tools/make_icons.py --only tray [--tray-source path/to/source.png]
 Requires Pillow on the development machine, never at app runtime.
@@ -26,6 +26,23 @@ def load_source(path: Path) -> Image.Image:
     return rgba
 
 
+def fit_tray_canvas(rgba: Image.Image) -> Image.Image:
+    # Ignore near-invisible alpha speckles when measuring the artwork. Keep
+    # its shape/aspect ratio and a small safety margin for antialiased edges.
+    bounds = rgba.getchannel("A").point(lambda alpha: 255 if alpha >= 16 else 0).getbbox()
+    if bounds is None:
+        raise ValueError("The tray source must contain visible artwork")
+    left, top, right, bottom = bounds
+    crop = rgba.crop((max(0, left - 2), max(0, top - 2),
+                      min(rgba.width, right + 2), min(rgba.height, bottom + 2)))
+    side = max(crop.size)
+    padding = max(1, round(side * 0.02))
+    canvas = Image.new("RGBA", (side + 2 * padding, side + 2 * padding))
+    canvas.paste(crop, ((canvas.width - crop.width) // 2,
+                        (canvas.height - crop.height) // 2))
+    return canvas
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("source", nargs="?", type=Path,
@@ -48,6 +65,7 @@ def main() -> None:
         shutil.copyfile(ICON_DIR / "icon.ico", runner)
         print(f"Packaged app icons in {ICON_DIR} and {runner}")
     if tray is not None:
+        tray = fit_tray_canvas(tray)
         tray.resize((32, 32), Image.Resampling.LANCZOS).save(ICON_DIR / "tray-icon.png")
         tray.save(ICON_DIR / "tray-icon.ico", sizes=[(s, s) for s in SIZES[:7]])
         print(f"Packaged coffee tray icons (16-64px) in {ICON_DIR}")
